@@ -16,15 +16,50 @@ until you explicitly arm it.
 
 Framing: each message is one JSON object, no delimiter. Readers split on
 balanced braces, and also tolerate newline-delimited JSON.
+
+Verified on a real Lexium Cobot (Oct 2026): ports 10000/10001/10004 speak
+this protocol wrapped in TLS 1.3 with a self-signed "LXM_Cobot" cert.
+Plain TCP connects but gets no data. The simulator stays plain TCP.
 """
 import json
 import socket
 import socketserver
+import ssl
 import threading
 import time
 
 CMD_PORT = 10001
 STATUS_PORT = 10000
+
+
+def _tls_context():
+    # The controller presents a self-signed cert, so there is nothing to verify against.
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def open_socket(host, port, timeout, tls=False):
+    s = socket.create_connection((host, port), timeout=timeout)
+    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    if tls:
+        try:
+            s = _tls_context().wrap_socket(s)
+        except Exception:
+            s.close()
+            raise
+    s.settimeout(timeout)
+    return s
+
+
+def detect_tls(host, port, timeout=2.0):
+    """True if the port completes a TLS handshake (real Schneider controller)."""
+    try:
+        open_socket(host, port, timeout, tls=True).close()
+        return True
+    except (ssl.SSLError, OSError):
+        return False
 
 
 class JsonStream:
@@ -251,16 +286,15 @@ class JakaServer:
 class JakaClient:
     """Request/response client for port 10001."""
 
-    def __init__(self, host, port=CMD_PORT, timeout=3.0):
-        self.host, self.port, self.timeout = host, port, timeout
+    def __init__(self, host, port=CMD_PORT, timeout=3.0, tls=False):
+        self.host, self.port, self.timeout, self.tls = host, port, timeout, tls
         self.sock = None
         self.stream = JsonStream()
         self.lock = threading.Lock()
 
     def connect(self):
         self.close()
-        self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
-        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock = open_socket(self.host, self.port, self.timeout, self.tls)
         self.stream = JsonStream()
 
     def close(self):

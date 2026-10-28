@@ -1,9 +1,10 @@
 """Forward / inverse kinematics for 6-axis Lexium Cobot arms (stdlib only).
 
-Geometry uses standard DH in the UR/JAKA style (all six Lexium models share
-this topology). Link lengths are approximations of the JAKA Zu arms the
-Lexium Cobot is built on -- good enough for simulation and visualisation.
-If you get the exact values from the Schneider hardware guide, edit PROFILES.
+Geometry uses JAKA's modified (Craig) DH convention, the same one the real
+controller reports joints in. The LXMRL03 values were read from a real
+controller with the JSON command {"cmdName": "get_dh_param"}; with nominal
+alphas and no theta offsets they reproduce the controller's own TCP readout
+to ~0.1 mm. The other models use JAKA Zu nominal values (unverified).
 
 Units: mm and degrees at the API surface, radians internally.
 Pose = [X, Y, Z, RX, RY, RZ]  (RX/RY/RZ = fixed-axis XYZ euler, R = Rz*Ry*Rx)
@@ -14,9 +15,10 @@ D2R = math.pi / 180.0
 R2D = 180.0 / math.pi
 
 # d1, a2, a3, d4, d5, d6 (mm); reach (mm); payload (kg); max joint speed (deg/s)
+# Modified DH: a = [0, 0, a2, a3, 0, 0], d = [d1, 0, 0, -d4, d5, d6]
 PROFILES = {
-    "LXMRL03": dict(name="Lexium Cobot L03 (3 kg)", d1=150.0, a2=246.0, a3=228.0,
-                    d4=117.5, d5=99.5, d6=94.0, reach=626, payload=3, vmax=180),
+    "LXMRL03": dict(name="Lexium Cobot L03 (3 kg)", d1=150.255, a2=246.914, a3=227.688,
+                    d4=113.122, d5=118.09, d6=105.926, reach=626, payload=3, vmax=180),
     "LXMRL07": dict(name="Lexium Cobot L07 (7 kg)", d1=120.15, a2=360.0, a3=303.5,
                     d4=113.5, d5=113.5, d6=107.0, reach=819, payload=7, vmax=180),
     "LXMRL12": dict(name="Lexium Cobot L12 (12 kg)", d1=142.65, a2=595.0, a3=571.5,
@@ -28,11 +30,9 @@ PROFILES = {
 # Joint soft limits (deg) -- JAKA Zu style.
 JOINT_LIMITS = [(-360, 360), (-85, 265), (-175, 175), (-85, 265), (-360, 360), (-360, 360)]
 
-# Offset between the robot's joint zero and the DH zero. With these offsets the
-# arm stands straight up at all-zero joints, like the real Lexium/JAKA arm.
-THETA_OFFSET = [0.0, -90.0, 0.0, -90.0, 0.0, 0.0]
+ALPHA = [0.0, 90.0, 0.0, 0.0, 90.0, -90.0]  # modified-DH link twists (deg)
 
-HOME = [0.0, 90.0, -90.0, 90.0, -90.0, 0.0]  # elbow-up ready pose (deg)
+HOME = [0.0, 90.0, -90.0, 90.0, 90.0, 0.0]  # elbow-up ready pose, tool down (deg)
 
 
 # ---------------------------------------------------------------- matrices
@@ -45,11 +45,12 @@ def transpose(A):
     return [list(r) for r in zip(*A)]
 
 
-def dh(theta, d, a, alpha):
+def mdh(alpha, a, theta, d):
+    """Modified DH: RotX(alpha) * TransX(a) * RotZ(theta) * TransZ(d)."""
     ct, st, ca, sa = math.cos(theta), math.sin(theta), math.cos(alpha), math.sin(alpha)
-    return [[ct, -st * ca, st * sa, a * ct],
-            [st, ct * ca, -ct * sa, a * st],
-            [0.0, sa, ca, d],
+    return [[ct, -st, 0.0, a],
+            [st * ca, ct * ca, -sa, -sa * d],
+            [st * sa, ct * sa, ca, ca * d],
             [0.0, 0.0, 0.0, 1.0]]
 
 
@@ -130,10 +131,10 @@ class Arm:
         self.model = model
         p = PROFILES[model]
         self.profile = p
-        # standard DH (UR convention, positive link lengths along -x)
-        self.d = [p["d1"], 0.0, 0.0, p["d4"], p["d5"], p["d6"]]
-        self.a = [0.0, -p["a2"], -p["a3"], 0.0, 0.0, 0.0]
-        self.alpha = [math.pi / 2, 0.0, 0.0, math.pi / 2, -math.pi / 2, 0.0]
+        # modified DH, JAKA convention
+        self.d = [p["d1"], 0.0, 0.0, -p["d4"], p["d5"], p["d6"]]
+        self.a = [0.0, 0.0, p["a2"], p["a3"], 0.0, 0.0]
+        self.alpha = [x * D2R for x in ALPHA]
         self.tool = [0.0] * 6  # TCP offset (mm, deg) relative to flange
 
     def frames(self, q_deg):
@@ -141,8 +142,7 @@ class Arm:
         T = [[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]
         out = [T]
         for i in range(6):
-            th = (q_deg[i] + THETA_OFFSET[i]) * D2R
-            T = mat_mul(T, dh(th, self.d[i], self.a[i], self.alpha[i]))
+            T = mat_mul(T, mdh(self.alpha[i], self.a[i], q_deg[i] * D2R, self.d[i]))
             out.append(T)
         tx, ty, tz, rx, ry, rz = self.tool
         Rt = rpy_to_R(rx * D2R, ry * D2R, rz * D2R)
@@ -165,9 +165,9 @@ class Arm:
         pts = [[0.0, 0.0, 0.0]]
         for i in range(6):
             T = F[i]
-            # point after the d offset along the joint axis, then after the a offset
-            pts.append([T[0][3] + T[0][2] * self.d[i], T[1][3] + T[1][2] * self.d[i],
-                        T[2][3] + T[2][2] * self.d[i]])
+            # point after the a offset along the previous x axis, then the joint frame (after d)
+            pts.append([T[0][3] + T[0][0] * self.a[i], T[1][3] + T[1][0] * self.a[i],
+                        T[2][3] + T[2][0] * self.a[i]])
             pts.append([F[i + 1][0][3], F[i + 1][1][3], F[i + 1][2][3]])
         T = F[-1]
         pts.append([T[0][3], T[1][3], T[2][3]])

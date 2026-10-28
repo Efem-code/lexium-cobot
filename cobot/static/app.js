@@ -117,7 +117,7 @@ const jspeed = () => +$("jspd").value * 2;
 function seg(a, b, cb) { a.onclick = () => { a.classList.add("sel"); b.classList.remove("sel"); cb(0); }; b.onclick = () => { b.classList.add("sel"); a.classList.remove("sel"); cb(1); }; }
 seg($("mSim"), $("mReal"), v => {
   mode = v ? "real" : "sim"; $("realArm").style.display = v ? "block" : "none";
-  if (!v) $("host").value = "127.0.0.1"; else if ($("host").value === "127.0.0.1") $("host").value = "192.168.1.100";
+  if (!v) $("host").value = "127.0.0.1"; else if ($("host").value === "127.0.0.1") $("host").value = "10.5.5.100";
 });
 seg($("fBase"), $("fTool"), v => frame = v ? "tool" : "base");
 $("btnConnect").onclick = async () => {
@@ -197,9 +197,10 @@ function pill(id, cls, txt) { const p = $(id); p.className = "pill " + cls; if (
 function render() {
   const P = S.ports || {};
   pill("pMode", S.connected ? "ok" : "bad", S.mode === "demo" ? "DEMO" : S.connected ? (S.mode === "sim" ? "SIMULATOR" : "REAL " + S.host) : (S.bridge_down ? "bridge offline" : "offline"));
-  pill("pModbus", S.modbus_ok ? "ok" : (S.connected ? "bad" : ""), "Modbus " + (P.modbus || 502));
-  pill("pCmd", S.cmd_ok ? "ok" : "", "Cmd " + (P.cmd || 10001));
-  pill("pStream", S.stream_ok ? "ok" : "", "Status " + (P.status || 10000));
+  // Modbus is optional on the real cobot when the (TLS) status stream is up
+  pill("pModbus", S.modbus_ok ? "ok" : (S.connected && !S.stream_ok ? "bad" : ""), "Modbus " + (P.modbus || 502));
+  pill("pCmd", S.cmd_ok ? "ok" : "", "Cmd " + (P.cmd || 10001) + (S.tls ? " TLS" : ""));
+  pill("pStream", S.stream_ok ? "ok" : "", "Status " + (P.status || 10000) + (S.tls ? " TLS" : ""));
   pill("pArm", S.motion_armed ? "ok" : "warn", S.motion_armed ? "motion enabled" : "read-only");
   $("connErr").textContent = S.last_error || "";
   $("simTools").style.display = S.mode === "real" ? "none" : "block";

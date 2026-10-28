@@ -11,13 +11,12 @@ Safety rules built in:
     after JOG_TIMEOUT seconds.
 """
 import json
-import socket
 import threading
 import time
 
 from . import kinematics as K
 from . import regmap as RM
-from .jaka_proto import JakaClient, JsonStream
+from .jaka_proto import JakaClient, JsonStream, detect_tls, open_socket
 from .modbus import ModbusClient
 
 JOG_TIMEOUT = 0.35
@@ -30,6 +29,7 @@ class CobotDriver:
         self.lock = threading.RLock()
         self.mode = None           # "sim" | "real" | None
         self.host = None
+        self.tls = False
         self.ports = {}
         self.mb = None
         self.cmd = None
@@ -49,15 +49,18 @@ class CobotDriver:
 
     # ----------------------------------------------------------- connection
     def connect(self, host, mode="sim", modbus_port=502, cmd_port=10001, status_port=10000,
-                model=None):
+                model=None, tls=None):
+        """tls=None auto-detects: the real controller wraps the JSON ports in TLS."""
         self.disconnect()
+        if tls is None:
+            tls = mode == "real" and detect_tls(host, cmd_port)
         with self.lock:
             self._gen += 1
             gen = self._gen
-            self.mode, self.host = mode, host
+            self.mode, self.host, self.tls = mode, host, tls
             self.ports = dict(modbus=modbus_port, cmd=cmd_port, status=status_port)
             self.mb = ModbusClient(host, modbus_port, timeout=1.5)
-            self.cmd = JakaClient(host, cmd_port, timeout=2.0)
+            self.cmd = JakaClient(host, cmd_port, timeout=2.0, tls=tls)
             self.motion_armed = (mode == "sim")
             self.connected = True
             self.last_error = ""
@@ -118,15 +121,18 @@ class CobotDriver:
             except Exception as e:
                 with self.lock:
                     self.mb_ok = False
-                    self.last_error = f"Modbus: {e}"
-                time.sleep(1.0)
+                    self.state = {}
+                    # Modbus is optional when the status stream already gives us the state
+                    if not self.stream_ok:
+                        self.last_error = f"Modbus: {e}"
+                time.sleep(5.0 if self.stream_ok else 1.0)
 
     def _poll_stream(self, gen):
         while gen == self._gen:
             try:
-                s = socket.create_connection((self.host, self.ports["status"]), timeout=2)
-                s.settimeout(2)
+                s = open_socket(self.host, self.ports["status"], 2, self.tls)
                 js = JsonStream()
+                last_hist = 0.0
                 while gen == self._gen:
                     data = s.recv(65536)
                     if not data:
@@ -136,6 +142,13 @@ class CobotDriver:
                         with self.lock:
                             self.extra = msgs[-1]
                             self.stream_ok = True
+                            if self.last_error.startswith("Modbus"):
+                                self.last_error = ""  # stream covers the state; Modbus is optional
+                            j = self.extra.get("joint_position")
+                            if not self.mb_ok and j and time.time() - last_hist > 0.05:
+                                last_hist = time.time()
+                                self.history.append((last_hist, j))
+                                del self.history[:-600]
                 s.close()
             except Exception:
                 with self.lock:
@@ -214,8 +227,15 @@ class CobotDriver:
                        ports=self.ports, modbus_ok=self.mb_ok, cmd_ok=self.cmd_ok,
                        stream_ok=self.stream_ok, motion_armed=self.motion_armed,
                        last_error=self.last_error, jogging=bool(self.jog_active),
-                       model=self.arm.model, model_name=self.arm.profile["name"])
-        if st:
+                       model=self.arm.model, model_name=self.arm.profile["name"],
+                       tls=self.tls)
+        if not st and ex.get("joint_position"):
+            out.update(_state_from_stream(ex))
+            try:
+                out["points"] = self.arm.joint_points(out["joints"])
+            except Exception:
+                pass
+        elif st:
             joints = [st[f"j{i+1}_position"] for i in range(6)]
             out.update(
                 joints=joints,
@@ -240,11 +260,50 @@ class CobotDriver:
                 pass
         if ex:
             out["control_source"] = ex.get("control_source")
-            out["errmsg"] = ex.get("errmsg")
+            out["errmsg"] = ex.get("errmsg", ex.get("error_msg"))
             out["log"] = ex.get("log", [])
             if ex.get("model") and ex.get("model") != out["model"] and self.mode == "sim":
                 self.arm.set_model(ex["model"])
         return out
+
+
+def _state_from_stream(ex):
+    """Map the real controller's port-10000 JSON to the same keys the Modbus path produces.
+
+    Field names were captured from a real Lexium Cobot (V1.7 firmware). The per-joint
+    monitor layout [current, voltage, temperature, ...] follows the JAKA SDK and is
+    unverified until the arm is powered on.
+    """
+    mon = ex.get("monitor_data") or []
+    joints_mon = mon[5] if len(mon) > 5 and isinstance(mon[5], list) else []
+
+    def jm(k):
+        return [float(j[k]) if isinstance(j, list) and len(j) > k else 0.0
+                for j in (joints_mon + [[]] * 6)[:6]]
+
+    err = ex.get("error_code", "0x0")
+    try:
+        errcode = int(str(err), 0)
+    except ValueError:
+        errcode = 0
+    tcp_speed = ex.get("tcp_speed", 0.0)
+    return dict(
+        joints=[float(v) for v in ex["joint_position"][:6]],
+        tcp=[float(v) for v in ex.get("cartesian_position", [0.0] * 6)[:6]],
+        joint_speed=[0.0] * 6,
+        joint_current=jm(0), joint_voltage=jm(1), joint_temp=jm(2),
+        tcp_speed=tcp_speed if isinstance(tcp_speed, list) else [float(tcp_speed)] + [0.0] * 5,
+        powered=bool(ex.get("powered_on")), enabled=bool(ex.get("enabled")),
+        estop=bool(ex.get("emergency_stop")),
+        protective_stop=bool(ex.get("protective_stop") or ex.get("collision_stop")),
+        on_soft_limit=bool(ex.get("on_soft_limit")), inpos=bool(ex.get("in_position")),
+        motion_mode="drag" if ex.get("drag_status") else ("program" if ex.get("program_state") else "idle"),
+        speed_ratio=float(ex.get("speed_rate", 1.0)) * 100,
+        errcode=errcode,
+        cab_temp=float(mon[2]) if len(mon) > 2 else 0.0,
+        cab_power=float(mon[3]) if len(mon) > 3 else 0.0,
+        dout=ex.get("dout", []), din=ex.get("din", []),
+    )
 
 
 def to_json(obj):

@@ -7,14 +7,15 @@
 const D2R = Math.PI / 180, R2D = 180 / Math.PI;
 
 const PROFILES = {
-  LXMRL03: {name: "Lexium Cobot L03 (3 kg)", d1: 150.0, a2: 246.0, a3: 228.0, d4: 117.5, d5: 99.5, d6: 94.0, reach: 626, payload: 3, vmax: 180},
+  // modified DH (JAKA convention); L03 read from a real controller via get_dh_param
+  LXMRL03: {name: "Lexium Cobot L03 (3 kg)", d1: 150.255, a2: 246.914, a3: 227.688, d4: 113.122, d5: 118.09, d6: 105.926, reach: 626, payload: 3, vmax: 180},
   LXMRL07: {name: "Lexium Cobot L07 (7 kg)", d1: 120.15, a2: 360.0, a3: 303.5, d4: 113.5, d5: 113.5, d6: 107.0, reach: 819, payload: 7, vmax: 180},
   LXMRL12: {name: "Lexium Cobot L12 (12 kg)", d1: 142.65, a2: 595.0, a3: 571.5, d4: 131.5, d5: 115.5, d6: 105.5, reach: 1327, payload: 12, vmax: 120},
   LXMRL18: {name: "Lexium Cobot L18 (18 kg)", d1: 166.0, a2: 476.0, a3: 420.0, d4: 160.0, d5: 129.0, d6: 118.0, reach: 1073, payload: 18, vmax: 120},
 };
 const JOINT_LIMITS = [[-360, 360], [-85, 265], [-175, 175], [-85, 265], [-360, 360], [-360, 360]];
-const THETA_OFFSET = [0, -90, 0, -90, 0, 0];
-const HOME = [0, 90, -90, 90, -90, 0];
+const ALPHA = [0, 90, 0, 0, 90, -90];
+const HOME = [0, 90, -90, 90, 90, 0];
 
 // ------------------------------------------------------------ matrices
 function matMul(A, B) {
@@ -23,9 +24,9 @@ function matMul(A, B) {
   return C;
 }
 const transpose = A => A[0].map((_, j) => A.map(r => r[j]));
-function dh(t, d, a, al) {
+function mdh(al, a, t, d) {
   const ct = Math.cos(t), st = Math.sin(t), ca = Math.cos(al), sa = Math.sin(al);
-  return [[ct, -st * ca, st * sa, a * ct], [st, ct * ca, -ct * sa, a * st], [0, sa, ca, d], [0, 0, 0, 1]];
+  return [[ct, -st, 0, a], [st * ca, ct * ca, -sa, -sa * d], [st * sa, ct * sa, ca, ca * d], [0, 0, 0, 1]];
 }
 function rpyToR(rx, ry, rz) {
   const cx = Math.cos(rx), sx = Math.sin(rx), cy = Math.cos(ry), sy = Math.sin(ry), cz = Math.cos(rz), sz = Math.sin(rz);
@@ -74,15 +75,15 @@ class Arm {
     if (!PROFILES[model]) throw new Error("unknown model " + model);
     const p = PROFILES[model];
     this.model = model; this.profile = p;
-    this.d = [p.d1, 0, 0, p.d4, p.d5, p.d6];
-    this.a = [0, -p.a2, -p.a3, 0, 0, 0];
-    this.alpha = [Math.PI / 2, 0, 0, Math.PI / 2, -Math.PI / 2, 0];
+    this.d = [p.d1, 0, 0, -p.d4, p.d5, p.d6];
+    this.a = [0, 0, p.a2, p.a3, 0, 0];
+    this.alpha = ALPHA.map(x => x * D2R);
     this.tool = this.tool || [0, 0, 0, 0, 0, 0];
   }
   frames(q) {
     let T = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]];
     const out = [T];
-    for (let i = 0; i < 6; i++) { T = matMul(T, dh((q[i] + THETA_OFFSET[i]) * D2R, this.d[i], this.a[i], this.alpha[i])); out.push(T); }
+    for (let i = 0; i < 6; i++) { T = matMul(T, mdh(this.alpha[i], this.a[i], q[i] * D2R, this.d[i])); out.push(T); }
     const [tx, ty, tz, rx, ry, rz] = this.tool, Rt = rpyToR(rx * D2R, ry * D2R, rz * D2R);
     out.push(matMul(T, [[...Rt[0], tx], [...Rt[1], ty], [...Rt[2], tz], [0, 0, 0, 1]]));
     return out;
@@ -95,8 +96,8 @@ class Arm {
   jointPoints(q) {
     const F = this.frames(q), pts = [[0, 0, 0]];
     for (let i = 0; i < 6; i++) {
-      const T = F[i], d = this.d[i];
-      pts.push([T[0][3] + T[0][2] * d, T[1][3] + T[1][2] * d, T[2][3] + T[2][2] * d]);
+      const T = F[i], a = this.a[i];
+      pts.push([T[0][3] + T[0][0] * a, T[1][3] + T[1][0] * a, T[2][3] + T[2][0] * a]);
       pts.push([F[i + 1][0][3], F[i + 1][1][3], F[i + 1][2][3]]);
     }
     const T = F[7]; pts.push([T[0][3], T[1][3], T[2][3]]);
