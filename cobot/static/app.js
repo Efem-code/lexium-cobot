@@ -254,24 +254,60 @@ function rpyR(rx, ry, rz) {
   return [[cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx], [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx], [-sy, cy * sx, cy * cx]];
 }
 function line(a, b, color, w) { const A = proj(a), Bp = proj(b); if (!A || !Bp) return; ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(Bp[0], Bp[1]); ctx.stroke(); }
-function drawArm(pts, alpha, ghostMode) {
-  if (!pts) return;
-  const segs = [];
-  for (let i = 0; i < pts.length - 1; i++) { if (Math.hypot(...sub(pts[i + 1], pts[i])) < 1) continue; segs.push([pts[i], pts[i + 1], i]); }
-  segs.sort((s1, s2) => { const a = proj(mul(add(s1[0], s1[1]), .5)), b = proj(mul(add(s2[0], s2[1]), .5)); return (b ? b[2] : 0) - (a ? a[2] : 0); });
-  ctx.lineCap = "round"; ctx.globalAlpha = alpha;
-  const scale = (profiles[S.model] && profiles[S.model].reach / 819) || 1;
-  for (const [a, b, i] of segs) {
-    const A = proj(a), Bp = proj(b); if (!A || !Bp) continue;
-    const rad = (i < 3 ? 62 : (i < 7 ? 50 : (i < 11 ? 42 : 34))) * Math.max(0.75, scale);
-    const w = rad * F / ((A[2] + Bp[2]) / 2);
-    const g = ctx.createLinearGradient(A[0], A[1] - w / 2, A[0], A[1] + w / 2);
-    if (ghostMode) { g.addColorStop(0, "#7fb8ff"); g.addColorStop(1, "#2f6bc0"); }
-    else if (i % 2 === 1 && i < 11) { g.addColorStop(0, "#3a4553"); g.addColorStop(1, "#1d242c"); }
-    else { g.addColorStop(0, "#f2f5f8"); g.addColorStop(.6, "#c7ced6"); g.addColorStop(1, "#8d98a5"); }
-    ctx.strokeStyle = g; ctx.lineWidth = Math.max(2, w); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(Bp[0], Bp[1]); ctx.stroke();
+// Arm colours, after the real Lexium Cobot: silver links, green joint housings, silver end caps.
+const PAINT = {
+  grey: ["#eef1f4", "#b9c0c8", "#7d8893"], green: ["#8fe89c", "#3dcd58", "#1f8a36"], cap: ["#ffffff", "#d9dee3", "#9aa4ae"],
+  ghost: ["#a9cfff", "#5d9bf0", "#2f6bc0"],
+};
+// One shaded cylinder from p0 to p1. capAt: 0 or 1 puts a silver end cap on that end.
+function cyl(p0, p1, r, paint, capAt) {
+  const A = proj(p0), Bq = proj(p1); if (!A || !Bq) return;
+  const ax = norm(sub(p1, p0)), ang = Math.atan2(Bq[1] - A[1], Bq[0] - A[0]);
+  const ends = [[p0, A], [p1, Bq]].map(([p, P]) => {
+    const R = r * F / P[2], k = Math.abs(dot(ax, norm(sub(p, B.eye))));
+    return {P, R, rMinor: Math.max(R * k, 0.5)};
+  });
+  const nx = -Math.sin(ang), ny = Math.cos(ang), R0 = ends[0].R, R1 = ends[1].R;
+  const g = ctx.createLinearGradient(A[0] - nx * R0, A[1] - ny * R0, A[0] + nx * R0, A[1] + ny * R0);
+  g.addColorStop(0, paint[0]); g.addColorStop(.45, paint[1]); g.addColorStop(1, paint[2]);
+  ctx.fillStyle = g; ctx.beginPath();
+  ctx.moveTo(A[0] + nx * R0, A[1] + ny * R0); ctx.lineTo(Bq[0] + nx * R1, Bq[1] + ny * R1);
+  ctx.lineTo(Bq[0] - nx * R1, Bq[1] - ny * R1); ctx.lineTo(A[0] - nx * R0, A[1] - ny * R0); ctx.closePath(); ctx.fill();
+  // draw the end facing the camera last so it sits on top
+  const facing = dot(ax, B.f) > 0 ? 0 : 1;
+  for (const e of [1 - facing, facing]) {
+    const {P, R, rMinor} = ends[e];
+    ctx.fillStyle = e === capAt && paint !== PAINT.ghost ? PAINT.cap[1] : paint[e === facing ? 1 : 2];
+    ctx.beginPath(); ctx.ellipse(P[0], P[1], rMinor, R, ang, 0, 7); ctx.fill();
+    if (e === capAt && e === facing && paint !== PAINT.ghost) { ctx.fillStyle = PAINT.cap[2]; ctx.beginPath(); ctx.ellipse(P[0], P[1], rMinor * .25, R * .25, ang, 0, 7); ctx.fill(); }
   }
-  if (!ghostMode) for (let i = 1; i < pts.length - 2; i += 2) { const P = proj(pts[i]); if (!P) continue; const r = 48 * Math.max(0.75, scale) * F / P[2]; ctx.fillStyle = "#3dcd58"; ctx.globalAlpha = alpha * .9; ctx.beginPath(); ctx.arc(P[0], P[1], Math.max(2, r * .35), 0, 7); ctx.fill(); }
+}
+// pts = [base, J2, J3, J3 after side step, J4, J5, flange, tcp] (see kinematics.joint_points)
+function drawArm(pts, alpha, ghostMode) {
+  if (!pts || pts.length !== 8) return;
+  const [base, sh, el, st, w1, w2, fl, tcp] = pts;
+  const s = Math.min(1.8, Math.max(1, ((profiles[S.model] && profiles[S.model].reach) || 626) / 626));
+  const at = (p, dir, d) => add(p, mul(dir, d * s));
+  const len = v => Math.hypot(...v), dirOr = (v, fb) => len(v) > 1e-6 ? norm(v) : fb;
+  const up = [0, 0, 1], side = dirOr(sub(st, el), [0, 1, 0]);   // joint axis of J2/J3/J4
+  const z5 = dirOr(sub(w2, w1), up), z6 = dirOr(sub(fl, w2), up);
+  const G = ghostMode ? PAINT.ghost : null, grey = G || PAINT.grey, green = G || PAINT.green, silver = G || PAINT.cap;
+  const mid = mul(add(st, w1), .5);
+  const parts = [
+    [base, at(base, up, 95), 58, grey], [at(base, up, 95), sh, 52, green],
+    // The caps face the side the forearm steps towards (matches a photo of the real arm).
+    [at(sh, side, -45), at(sh, side, 62), 52, green, 1],              // J2 housing
+    [sh, el, 40, grey],                                                 // upper arm
+    [at(el, side, -12), at(st, side, 50), 46, green, 1],              // J3 housing incl. side step
+    [st, mid, 35, grey], [mid, w1, 35, green],                        // forearm
+    [at(w1, side, -40), at(w1, side, 45), 38, green, 1],              // J4
+    [w1, at(w2, z5, 32), 36, green, 1],                               // J5
+    [w2, at(fl, z6, -14), 34, green], [at(fl, z6, -14), fl, 31, silver, 1], // J6 + flange
+  ];
+  if (len(sub(tcp, fl)) > 1) parts.push([fl, tcp, 10, grey]);
+  parts.sort((a, b) => { const pa = proj(mul(add(a[0], a[1]), .5)), pb = proj(mul(add(b[0], b[1]), .5)); return (pb ? pb[2] : 0) - (pa ? pa[2] : 0); });
+  ctx.globalAlpha = alpha;
+  for (const [p0, p1, r, paint, capAt] of parts) cyl(p0, p1, r * s, paint, capAt);
   ctx.globalAlpha = 1;
 }
 function drawFrame(p, R, len, alpha) {

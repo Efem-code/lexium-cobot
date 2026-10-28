@@ -160,18 +160,20 @@ class Arm:
         return [T[0][3], T[1][3], T[2][3], rx * R2D, ry * R2D, rz * R2D]
 
     def joint_points(self, q_deg):
-        """3D points for drawing: base, shoulder, elbow offsets, wrist, flange, tcp."""
+        """Physical skeleton for drawing, matching the real arm's layout:
+        [base, shoulder (J2), elbow (J3), elbow after the sideways step,
+         wrist 1 (J4), wrist 2 (J5), flange (J6), tcp].
+
+        The DH model puts the whole d4 side offset at J4. On the real arm the
+        forearm steps sideways inside the elbow housing, so the step is drawn
+        there instead. The joint positions and the TCP are unchanged.
+        """
         F = self.frames(q_deg)
-        pts = [[0.0, 0.0, 0.0]]
-        for i in range(6):
-            T = F[i]
-            # point after the a offset along the previous x axis, then the joint frame (after d)
-            pts.append([T[0][3] + T[0][0] * self.a[i], T[1][3] + T[1][0] * self.a[i],
-                        T[2][3] + T[2][0] * self.a[i]])
-            pts.append([F[i + 1][0][3], F[i + 1][1][3], F[i + 1][2][3]])
-        T = F[-1]
-        pts.append([T[0][3], T[1][3], T[2][3]])
-        return pts
+        org = [[T[0][3], T[1][3], T[2][3]] for T in F]
+        z3 = [F[3][0][2], F[3][1][2], F[3][2][2]]
+        d4 = self.d[3]
+        step = [org[3][k] + z3[k] * d4 for k in range(3)]
+        return [[0.0, 0.0, 0.0], org[2], org[3], step, org[4], org[5], org[6], org[7]]
 
     # ---------- jacobian / IK
     def _pose_err(self, T, Tt):

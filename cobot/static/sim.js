@@ -94,14 +94,11 @@ class Arm {
     return [T[0][3], T[1][3], T[2][3], rx * R2D, ry * R2D, rz * R2D];
   }
   jointPoints(q) {
-    const F = this.frames(q), pts = [[0, 0, 0]];
-    for (let i = 0; i < 6; i++) {
-      const T = F[i], a = this.a[i];
-      pts.push([T[0][3] + T[0][0] * a, T[1][3] + T[1][0] * a, T[2][3] + T[2][0] * a]);
-      pts.push([F[i + 1][0][3], F[i + 1][1][3], F[i + 1][2][3]]);
-    }
-    const T = F[7]; pts.push([T[0][3], T[1][3], T[2][3]]);
-    return pts;
+    // Physical skeleton (same as kinematics.py): base, J2, J3, J3 after the sideways
+    // step (drawn in the elbow, like the real arm), J4, J5, flange, tcp.
+    const F = this.frames(q), org = F.map(T => [T[0][3], T[1][3], T[2][3]]);
+    const d4 = this.d[3], step = [0, 1, 2].map(k => org[3][k] + F[3][k][2] * d4);
+    return [[0, 0, 0], org[2], org[3], step, org[4], org[5], org[6], org[7]];
   }
   poseErr(T, Tt) {
     const R = T.slice(0, 3).map(r => r.slice(0, 3)), Rt = Tt.slice(0, 3).map(r => r.slice(0, 3));
