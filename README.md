@@ -40,7 +40,7 @@ There are two ways to use the same app on an iPad or phone:
 
 | | Demo | Live |
 |---|---|---|
-| Where | `https://efem.github.io/lexium-cobot/` (GitHub Pages) | `http://<PC-IP>:8765`, served by the bridge on the PC |
+| Where | `https://efem-code.github.io/lexium-cobot/` (GitHub Pages) | `http://<PC-IP>:8765`, served by the bridge on the PC |
 | Needs | nothing (works offline once opened) | the PC running `Start iPad Bridge.bat`, with the PC and the iPad on the cobot's Wi-Fi |
 | Moves | the simulator, running on the iPad | the simulated cobot on the PC, or the real cobot |
 
