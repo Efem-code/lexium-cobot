@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lexium Cobot Controller</title>
+<meta name="description" content="Simulate, monitor and jog a Schneider Lexium Cobot from a PC, phone or iPad.">
+<meta name="theme-color" content="#171c23">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cobot">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<style>
+:root{
+  --bg:#0f1318; --panel:#171c23; --panel2:#1e252e; --line:#2a333e; --text:#d8dee6; --mute:#8592a1;
+  --accent:#3dcd58; --accent2:#2a9d43; --warn:#f0b429; --bad:#e5484d; --blue:#4c9aff;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.35 "Segoe UI",system-ui,-apple-system,sans-serif}
+button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+button:hover{border-color:#3b4756}
+button:active,button.held{background:#26303b;border-color:var(--accent)}
+button.hold{touch-action:none}
+button.primary{background:var(--accent2);border-color:var(--accent)}
+button.danger{background:#5a1d20;border-color:var(--bad)}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select{font:inherit;color:var(--text);background:#0c1014;border:1px solid var(--line);border-radius:5px;padding:5px 7px;min-width:0}
+input[type=range]{padding:0;accent-color:var(--accent)}
+h2{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:0 0 8px;font-weight:600}
+.app{display:grid;grid-template-columns:320px minmax(0,1fr) 340px;grid-template-rows:48px minmax(0,1fr);height:100vh;height:100dvh}
+header{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
+header .brand{font-weight:600;font-size:15px;white-space:nowrap}
+header .brand span{color:var(--accent)}
+.pill{padding:3px 9px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--mute);white-space:nowrap}
+.pill.ok{color:#bff5c9;border-color:var(--accent2)}
+.pill.bad{color:#ffc9cb;border-color:var(--bad)}
+.pill.warn{color:#ffe8b0;border-color:var(--warn)}
+.spacer{flex:1}
+.side{overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--bg);min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+label.f{display:flex;flex-direction:column;gap:3px;color:var(--mute);font-size:11px}
+.lights{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
+.light{display:flex;align-items:center;gap:7px;color:var(--mute)}
+.dot{width:9px;height:9px;border-radius:50%;background:#39424d;flex:none}
+.dot.on{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.dot.red{background:var(--bad);box-shadow:0 0 6px var(--bad)}
+.dot.amber{background:var(--warn)}
+.jog{display:grid;grid-template-columns:30px 1fr 42px 42px;gap:5px;align-items:center;margin-bottom:5px}
+.jog .n{color:var(--mute);font-weight:600}
+.jog .v{font-variant-numeric:tabular-nums;text-align:right;padding-right:4px}
+.jog button{padding:5px 0;font-weight:700;font-size:15px}
+.jog input[type=range]{grid-column:2/5;width:100%;margin:-2px 0 6px}
+.view{grid-column:2;grid-row:2;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#1b232d,#0b0e12);min-height:0}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.hud{position:absolute;left:12px;top:10px;color:var(--mute);font-size:12px;pointer-events:none;line-height:1.5}
+.hud b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:500}
+.target{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:none;gap:8px;align-items:center;background:rgba(23,28,35,.95);border:1px solid var(--blue);border-radius:10px;padding:8px 10px;max-width:calc(100% - 20px);flex-wrap:wrap;justify-content:center}
+.target.show{display:flex}
+.help{position:absolute;right:12px;bottom:12px;color:#5d6b7a;font-size:11px;text-align:right;pointer-events:none}
+.mono{font-family:Consolas,ui-monospace,monospace;font-size:12px}
+.log{max-height:150px;overflow:auto;color:var(--mute)}
+.io{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.io div{border:1px solid var(--line);border-radius:4px;text-align:center;font-size:10px;padding:5px 0;color:var(--mute);cursor:pointer;user-select:none}
+.io div.on{background:var(--accent2);color:#fff;border-color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+td,th{padding:2px 4px;text-align:right}
+th{color:var(--mute);font-weight:500}
+td:first-child,th:first-child{text-align:left}
+.wp{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
+.wp:last-child{border:0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent;padding:5px 10px}
+.seg button.sel{background:var(--accent2)}
+.err{color:#ffb4b6;min-height:16px;font-size:12px}
+.note{color:var(--mute);font-size:11px;margin-top:6px}
+.toast{position:fixed;left:50%;top:calc(58px + var(--safe-t));transform:translateX(-50%);background:#5a1d20;border:1px solid var(--bad);padding:8px 14px;border-radius:8px;display:none;z-index:9;max-width:90vw}
+.tabs{display:none}
+.only-demo{display:none} body.demo .only-demo{display:block} body.demo .no-demo{display:none!important}
+#pin{position:fixed;inset:0;background:rgba(10,13,17,.97);display:none;align-items:center;justify-content:center;z-index:20}
+#pin.show{display:flex}
+#pin .card{width:min(320px,90vw);text-align:center}
+#pin input{width:100%;font-size:22px;text-align:center;letter-spacing:.3em;margin:10px 0}
+
+/* ---------- phones & tablets ---------- */
+@media (max-width:900px), (pointer:coarse) and (max-width:1400px){
+  body{font-size:15px}
+  .app{display:flex;flex-direction:column;height:auto;min-height:100dvh}
+  header{padding:calc(8px + var(--safe-t)) 12px 8px;gap:8px;position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  header .brand{font-size:14px}
+  header .brand span,#pModbus,#pCmd,#pStream,.speedlbl{display:none}
+  #btnStop{margin-left:auto}
+  .view{height:44vh;min-height:250px;flex:none}
+  .help{display:none}
+  .tabs{display:flex;position:sticky;top:calc(50px + var(--safe-t));z-index:4;background:var(--panel);border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;border:0;border-radius:0;background:transparent;padding:11px 0;color:var(--mute);font-size:13px}
+  .tabs button.sel{color:var(--text);box-shadow:inset 0 -2px var(--accent)}
+  .side{overflow:visible;padding:10px 10px 0}
+  .side:last-of-type{padding-bottom:calc(16px + var(--safe-b))}
+  .card{display:none}
+  .card.show{display:block}
+  .side:not(:has(.card.show)){display:none}
+  .jog{grid-template-columns:34px 1fr 64px 64px;gap:8px;margin-bottom:8px}
+  .jog button{padding:13px 0;font-size:20px}
+  .grid2 button{padding:11px 8px}
+  input,select{font-size:16px}  /* stops iOS zooming into inputs */
+  .io div{padding:9px 0;font-size:12px}
+  .mono{font-size:13px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">Lexium Cobot <span>Controller</span></div>
+    <span id="pMode" class="pill">offline</span>
+    <span id="pModbus" class="pill">Modbus</span>
+    <span id="pCmd" class="pill">Cmd 10001</span>
+    <span id="pStream" class="pill">Status 10000</span>
+    <span id="pArm" class="pill">—</span>
+    <div class="spacer"></div>
+    <label class="row speedlbl" style="color:var(--mute)">Speed <input id="speed" type="range" min="1" max="100" value="50" style="width:130px"> <b id="speedV">50%</b></label>
+    <button id="btnStop" class="danger" style="font-weight:700;padding:8px 18px">STOP</button>
+  </header>
+
+  <div class="view" id="view">
+    <canvas id="cv"></canvas>
+    <div class="hud" id="hud"></div>
+    <div class="target" id="targetBar">
+      <span class="mono" id="targetTxt"></span>
+      <button id="tLin" class="primary">Move linear</button>
+      <button id="tJnt">Move joint</button>
+      <button id="tCancel">Cancel</button>
+    </div>
+    <div class="help">Drag the green TCP ball to set a target · Shift+drag = up/down<br>Drag empty space = orbit · Right-drag = pan · Wheel = zoom</div>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
+  </nav>
+
+  <!-- LEFT -->
+  <div class="side" style="grid-column:1;grid-row:2">
+    <div class="card" data-tab="setup">
+      <h2>Connection</h2>
+      <div class="only-demo">
+        <p style="margin:0 0 8px"><b>Demo mode</b>: the simulator is running on this device. Nothing here can move a real robot.</p>
+        <label class="f">Model<select id="modelDemo"></select></label>
+        <h2 style="margin-top:12px">Go live (real cobot)</h2>
+        <p class="note" style="margin-top:0">1. Join the cobot's Wi-Fi. 2. Start the bridge on the PC (it shows its address). 3. Enter it here.</p>
+        <div class="row"><input id="bridgeAddr" placeholder="192.168.x.x:8765" inputmode="url" style="flex:1"><button id="goLive" class="primary">Go live</button></div>
+        <p class="note">The live app looks and works the same as this one. On iPad, tap Share → Add to Home Screen there too.</p>
+      </div>
+      <div class="no-demo">
+        <div class="seg" style="margin-bottom:8px"><button id="mSim" class="sel">Simulator</button><button id="mReal">Real cobot</button></div>
+        <div class="grid2">
+          <label class="f">Controller IP<input id="host" value="127.0.0.1" inputmode="decimal"></label>
+          <label class="f">Model<select id="model"></select></label>
+          <label class="f">Modbus port<input id="pmb" value="502" inputmode="numeric"></label>
+          <label class="f">Cmd / status<input id="pcs" value="10001/10000"></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="btnConnect" class="primary">Connect</button>
+          <button id="btnDisconnect">Disconnect</button>
+        </div>
+        <div id="realArm" style="display:none;margin-top:8px">
+          <label class="row"><input type="checkbox" id="arm"> <span>Arm motion on real cobot</span></label>
+          <div class="note">Read-only until armed. Cobot Expert must hand control to <b>Remote</b>. Keep the E-stop in reach.</div>
+        </div>
+        <p class="note"><a href="?demo" style="color:var(--blue)">Open demo mode</a> (simulator runs on this device, no bridge needed)</p>
+      </div>
+      <div class="err" id="connErr"></div>
+      <div class="row" style="margin-top:6px">
+        <label class="row" style="color:var(--mute)">Speed <input id="speed2" type="range" min="1" max="100" value="50" style="width:150px"> <b id="speedV2">50%</b></label>
+      </div>
+    </div>
+
+    <div class="card" data-tab="robot">
+      <h2>Robot</h2>
+      <div class="lights" id="lights"></div>
+      <div class="grid2" style="margin-top:10px">
+        <button id="bPower">Power on</button><button id="bPowerOff">Power off</button>
+        <button id="bEnable" class="primary">Enable</button><button id="bDisable">Disable</button>
+        <button id="bClear">Clear error</button><button id="bHome">Go home</button>
+      </div>
+      <div id="simTools" style="margin-top:10px">
+        <h2 style="margin-top:6px">Simulator only</h2>
+        <div class="grid2">
+          <button id="bEstop" class="danger">E-stop</button><button id="bColl">Fake collision</button>
+          <button id="bSrc">Control: Remote</button><button id="bResetSim">Reset errors</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" data-tab="data">
+      <h2>Live data</h2>
+      <table class="mono" id="live"></table>
+      <div class="row" style="margin-top:6px;color:var(--mute)">Cabinet <b id="cab" style="color:var(--text)">—</b></div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="side" style="grid-column:3;grid-row:2">
+    <div class="card show" data-tab="jog">
+      <div class="row" style="justify-content:space-between"><h2>Joint jog (hold)</h2><span style="color:var(--mute)">deg/s <input id="jspd" value="20" inputmode="numeric" style="width:52px"></span></div>
+      <div id="joints"></div>
+      <div class="row"><button id="bSliders">Move to sliders</button><button id="bSync">Reset sliders</button></div>
+    </div>
+    <div class="card show" data-tab="jog">
+      <div class="row" style="justify-content:space-between">
+        <h2>Cartesian jog (hold)</h2>
+        <div class="seg"><button id="fBase" class="sel">Base</button><button id="fTool">Tool</button></div>
+      </div>
+      <div class="row" style="color:var(--mute);margin-bottom:6px">mm/s <input id="cspd" value="50" inputmode="numeric" style="width:56px"> deg/s <input id="rspd" value="15" inputmode="numeric" style="width:52px"></div>
+      <div id="cart"></div>
+    </div>
+    <div class="card" data-tab="points">
+      <div class="row" style="justify-content:space-between"><h2>Waypoints</h2><div class="row"><button id="bTeach">+ Teach</button><button id="bPlay" class="primary">Play</button></div></div>
+      <div id="wps" style="color:var(--mute)">No waypoints yet.</div>
+    </div>
+    <div class="card" data-tab="data">
+      <h2>Digital I/O</h2>
+      <div style="color:var(--mute);font-size:11px;margin-bottom:4px">DO 0–15 (tap to toggle)</div>
+      <div class="io" id="dout"></div>
+      <div style="color:var(--mute);font-size:11px;margin:8px 0 4px">DI 0–15</div>
+      <div class="io" id="din"></div>
+    </div>
+    <div class="card" data-tab="data">
+      <h2>Controller log</h2>
+      <div class="log mono" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<div id="pin"><div class="card show">
+  <h2>Cobot bridge</h2>
+  <div>Enter the PIN shown on the PC</div>
+  <input id="pinIn" type="password" inputmode="numeric" autocomplete="off">
+  <button id="pinGo" class="primary" style="width:100%">Unlock</button>
+  <div class="err" id="pinErr"></div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script src="sim.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
