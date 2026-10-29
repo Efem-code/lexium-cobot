@@ -20,6 +20,15 @@ from .jaka_proto import JakaClient, JsonStream, detect_tls, open_socket
 from .modbus import ModbusClient
 
 JOG_TIMEOUT = 0.35
+COORD_MAP = {"base": 0, "joint": 1, "tool": 2}
+
+
+def _jog_stop_fields(active):
+    """JAKA reads coord_map + jnum on a stop, so name the axis that is moving."""
+    coord, axis = (active[0], active[1]) if active else ("joint", 0)
+    return dict(jog_mode=0, coord_map=COORD_MAP[coord], jnum=int(axis))
+
+
 MOTION_CMDS = {"joint_move", "end_move", "moveL", "jog", "power_on", "enable_robot",
                "set_digital_output", "set_tool_offsets"}
 
@@ -80,7 +89,7 @@ class CobotDriver:
         with self.lock:
             if self.jog_active and self.cmd:
                 try:
-                    self.cmd.send("jog", jog_mode=0)
+                    self.cmd.send("jog", **_jog_stop_fields(self.jog_active))
                 except Exception:
                     pass
             self._gen += 1
@@ -159,14 +168,12 @@ class CobotDriver:
         while gen == self._gen:
             time.sleep(0.05)
             with self.lock:
+                stop = None
                 if self.jog_active and time.time() - self.jog_last > JOG_TIMEOUT:
-                    self.jog_active = None
-                    stop = True
-                else:
-                    stop = False
+                    stop, self.jog_active = self.jog_active, None
             if stop:
                 try:
-                    self.cmd.send("jog", jog_mode=0)
+                    self.cmd.send("jog", **_jog_stop_fields(stop))
                 except Exception as e:
                     self.last_error = f"jog stop failed: {e}"
 
@@ -190,9 +197,11 @@ class CobotDriver:
         return r
 
     def jog_start(self, coord, axis, direction, speed):
-        """coord: joint|base|tool ; axis 0..5 ; direction +1/-1 ; speed deg/s or mm/s"""
-        cm = {"base": 0, "joint": 1, "tool": 2}[coord]
-        r = self.command("jog", jog_mode=2, coord_map=cm, jnum=axis + 1,
+        """coord: joint|base|tool ; axis 0..5 ; direction +1/-1 ; speed deg/s or mm/s
+
+        JAKA jog: jog_mode 1 = continuous (sign of jogvel), 2 = fixed step (poscmd),
+        0 = stop; jnum is 0-based (J1..J6 / X..RZ = 0..5)."""
+        r = self.command("jog", jog_mode=1, coord_map=COORD_MAP[coord], jnum=int(axis),
                          jogvel=float(speed) * (1 if direction > 0 else -1))
         if r.get("errorCode") in ("0", 0):
             with self.lock:
@@ -207,12 +216,18 @@ class CobotDriver:
 
     def jog_stop(self):
         with self.lock:
-            self.jog_active = None
-        return self.command("jog", jog_mode=0)
+            active, self.jog_active = self.jog_active, None
+        # the controller stops only the axis named in the stop message
+        return self.command("jog", **_jog_stop_fields(active))
 
     def stop_all(self):
         with self.lock:
-            self.jog_active = None
+            active, self.jog_active = self.jog_active, None
+        if active:
+            try:
+                self.command("jog", **_jog_stop_fields(active))
+            except Exception:
+                pass
         return self.command("stop_program")
 
     def ik(self, pose, seed):

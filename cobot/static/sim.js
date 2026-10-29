@@ -269,7 +269,9 @@ class SimRobot {
         case "end_move": e = this.movePoseJoint(msg.endPosition, +(msg.speed ?? 20), +(msg.accel ?? 100)); break;
         case "moveL": e = this.moveLinear(msg.cartPosition, +(msg.speed ?? 50), +(msg.accel ?? 500), !!msg.relFlag); break;
         case "jog": {
-          const mode = +(msg.jog_mode || 0), coord = ({0: "base", 1: "joint", 2: "tool"})[+(msg.coord_map ?? 1)], axis = +(msg.jnum || 1) - 1, vel = +(msg.jogvel || 0);
+          const mode = +(msg.jog_mode || 0), coord = ({0: "base", 1: "joint", 2: "tool"})[+(msg.coord_map ?? 1)], axis = +(msg.jnum || 0), vel = +(msg.jogvel || 0);
+          // JAKA: jog_mode 0 stop, 1 continuous, 2 incremental; jnum 0-based
+          if (!(axis >= 0 && axis <= 5)) return {errorCode: "1", errorMsg: "jnum must be 0..5", cmdName: cmd};
           if (mode === 0) e = this.stop();
           else if (coord === "joint") e = this.jogJoint(axis, vel);
           else e = this.jogCart(axis, vel, coord);
@@ -333,7 +335,7 @@ class LocalTransport {
         case "/api/cmd": { const {cmdName, ...rest} = b; return this.cmd(cmdName, rest); }
         case "/api/jog": {
           const cm = {base: 0, joint: 1, tool: 2}[b.coord];
-          const r = this.cmd("jog", {jog_mode: 2, coord_map: cm, jnum: +b.axis + 1, jogvel: +b.speed * (b.dir > 0 ? 1 : -1)});
+          const r = this.cmd("jog", {jog_mode: 1, coord_map: cm, jnum: +b.axis, jogvel: +b.speed * (b.dir > 0 ? 1 : -1)});
           if (r.errorCode === "0") { this.jogActive = true; this.jogLast = performance.now(); }
           return r;
         }

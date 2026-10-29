@@ -146,17 +146,17 @@ def handle_command(robot, msg):
                                   float(msg.get("accel", 500)), rel=bool(msg.get("relFlag", 0)),
                                   cmd_id=int(msg.get("id", 0)))
         elif cmd == "jog":
-            # jog_mode: 0 stop, 1 incremental (poscmd), 2 continuous (sign of jogvel)
-            # coord_map: 0 base/world, 1 joint, 2 tool ; jnum: axis 1..6
+            # JAKA: jog_mode 0 stop, 1 continuous (sign of jogvel), 2 incremental (poscmd)
+            # coord_map: 0 base/world, 1 joint, 2 tool ; jnum: axis 0..5 (0-based)
             mode = int(msg.get("jog_mode", 0))
             coord = {0: "base", 1: "joint", 2: "tool"}.get(int(msg.get("coord_map", 1)), "joint")
-            axis = int(msg.get("jnum", 1)) - 1
+            axis = int(msg.get("jnum", 0))
             vel = float(msg.get("jogvel", 0))
-            if not 0 <= axis <= 5 and mode != 0:
-                return _err(cmd, "jnum must be 1..6")
+            if not 0 <= axis <= 5:
+                return _err(cmd, "jnum must be 0..5")
             if mode == 0:
                 e = robot.stop()
-            elif mode == 1:
+            elif mode == 2:
                 e = robot.jog_increment(coord, axis, float(msg.get("poscmd", 0)), vel)
             elif coord == "joint":
                 e = robot.jog_joint(axis, vel)

@@ -208,7 +208,7 @@ class SimRobot:
             self.jog = dict(kind="cart", axis=axis, vel=float(vel), frame=frame, last=time.time())
 
     def jog_increment(self, coord, axis, step, vel):
-        """Single incremental jog step (JAKA jog_mode=1)."""
+        """Single incremental jog step (JAKA jog_mode=2)."""
         with self.lock:
             if coord == "joint":
                 tgt = list(self.q)
