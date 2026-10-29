@@ -1,96 +1,121 @@
-# Lexium Cobot – PC Simulator & Controller
+# Lexium Cobot – Simulator, Web Controller & Python SDK
 
-Simulate a Schneider **Lexium Cobot** on this PC, drive it with the mouse, then point the same app at the real arm, and later at a **Modicon TM262** PLC.
+Simulate a Schneider **Lexium Cobot**, drive it from a browser (PC, iPad or phone), script it in Python or JavaScript, then point the same tools at the real arm. Built and tested against a real **LXMRL03** (firmware 1.7.0_60_SE). Standard-library Python only, works offline.
 
-Python 3.10+ only, no pip installs, works offline.
+Try it now, nothing to install: **https://efem-code.github.io/lexium-cobot/** (demo: a simulator running in your browser).
 
 ```
- ┌───────────── this PC ─────────────┐
- │  Browser UI (mouse jog, 3D view)  │
- │            │ HTTP :8765           │
- │  PC controller (cobot/driver.py)  │──── same protocols ────┐
- │            │                      │                        │
- │  Virtual controller (sim) ◄───────┘  OR  real Lexium Cobot Controller
- │   Modbus TCP :502                 │         Modbus TCP :502
- │   JSON cmd   :10001               │         JSON cmd   :10001 (verify)
- │   JSON status:10000               │         JSON status:10000 (verify)
- └───────────────────────────────────┘
-          ▲ later: TM262 (Machine Expert + LexiumCobotCommunication lib)
+ browser page (3D view, jog, setup, programs, scripts)        Python scripts (cobot.sdk)
+        │ HTTP :8765                                                │
+        ▼                                                           ▼
+ bridge = this app (PC .exe, run.py, or ipad.py in a-Shell)  ──or── Robot.connect(...)
+   speed limit · floor/joint/reach limits · read-only until armed · jog dead-man
+        │ JSON over TLS :10001 (commands) + :10000 (status)
+        ▼
+ real Lexium Cobot controller  ──or──  built-in simulator (same protocol)
 ```
 
-## Run it
+## Install
 
-```bash
-python run.py
-```
+| You want | Do this |
+|---|---|
+| **Windows, no Python** | Download `LexiumCobot.exe` from [Releases](https://github.com/Efem-code/lexium-cobot/releases) and double-click it. Windows may warn about an unknown publisher (the exe isn't code-signed): *More info → Run anyway*. |
+| **Any OS with Python 3.9+** | `pip install git+https://github.com/Efem-code/lexium-cobot` then run `lexium-cobot` |
+| **The source** | `git clone https://github.com/Efem-code/lexium-cobot` then `python run.py` (or double-click `Start Simulator.bat`) |
+| **iPad, no PC** | free a-Shell app + `python3 ipad.py`: see [docs/IPAD_ASHELL.md](docs/IPAD_ASHELL.md) |
 
-This starts the simulator and the controller UI, and opens http://127.0.0.1:8765. Or double-click `Start Simulator.bat`.
+All of them start the simulator and open the controller page at http://127.0.0.1:8765.
 
 | Command | What it does |
 |---|---|
-| `python run.py` | sim + UI, auto-connected |
-| `python run.py sim --public` | sim only, listening on the LAN (so a TM262 or another PC can connect) |
-| `python run.py ui` | UI only; connect to a real cobot from the page |
-| `python run.py --model LXMRL12` | pick the arm: `LXMRL03`, `LXMRL07`, `LXMRL12`, `LXMRL18` |
-| `python -m tests.test_e2e` | 25-check end-to-end test over real sockets |
+| `lexium-cobot` (or `python run.py`) | simulator + page, auto-connected |
+| `lexium-cobot ui` | page only: connect to the real cobot from **Setup** |
+| `lexium-cobot --lan` | also serve the page to phones/iPads on the same Wi-Fi (PIN protected) |
+| `lexium-cobot sim --public` | simulator only, on the LAN (for a TM262 or another PC) |
+| `lexium-cobot --model LXMRL12` | arm model: `LXMRL03` (default), `LXMRL07`, `LXMRL12`, `LXMRL18` |
 
-## iPad / phone
+Settings (bridge limits, iPad PIN) are saved per user in `%APPDATA%\LexiumCobot\settings.json` (Windows) or `~/.lexium-cobot/settings.json`.
 
-There are two ways to use the same app on an iPad or phone:
+## Connect to the real cobot
 
-| | Demo | Live |
-|---|---|---|
-| Where | `https://efem-code.github.io/lexium-cobot/` (GitHub Pages) | `http://<PC-IP>:8765`, served by the bridge on the PC |
-| Needs | nothing (works offline once opened) | the PC running `Start iPad Bridge.bat`, with the PC and the iPad on the cobot's Wi-Fi |
-| Moves | the simulator, running on the iPad | the simulated cobot on the PC, or the real cobot |
+1. Join the cobot's Wi-Fi (SSID = controller serial, password on the label in the cabinet door). The controller is `10.5.5.100`.
+2. Close Cobot Expert (or leave it on **Local**): the page doesn't need it, and too many connections overload the controller.
+3. **Setup → Real cobot → Connect.** The page is **read-only** until you tick **Arm motion on real cobot**. The speed limit starts at **10 %** on every connect.
 
-On the iPad, open either address in Safari, then tap **Share → Add to Home Screen**. You get an app icon that opens full screen. Add both if you want both.
+Details and everything verified on the real controller: [docs/REAL_HARDWARE.md](docs/REAL_HARDWARE.md).
 
-**Why a bridge?** Browsers can only make web requests. The cobot speaks Modbus TCP and raw TCP sockets, so something on its network has to translate, even when the iPad is on the cobot's own Wi-Fi. The bridge is `run.py`, running on a PC. Later it could run on a small always-on box such as a Raspberry Pi next to the cobot.
+## The page
 
-**iPad only, no PC:** the bridge also runs on the iPad itself in the free a-Shell app (`python3 ipad.py`), with the page opening inside a-Shell. See [docs/IPAD_ASHELL.md](docs/IPAD_ASHELL.md).
+| Tab / card | What you can do |
+|---|---|
+| **3D view** | live arm (matches the real one to < 0.3 mm). Drag the orange TCP ball to set a target (Shift+drag = up/down), preview it, then *Move linear* or *Move joint*. Drag = orbit, right-drag = pan, wheel = zoom. |
+| **Jog** | hold-to-run joint and Cartesian (base/tool) jog. Release, a closed tab or a dropped network stops the arm within 350 ms. Joint sliders + *Move to sliders*. |
+| **Robot** | power on/off, enable/disable, clear error, go home (asks first on the real cobot), status lights. |
+| **Points** | teach waypoints (J = joint move, L = straight line per point), play once or **loop continuously** with a pause, export/import as files, turn them into a script. **Programs on the cobot**: load a program saved on the controller by name, run / pause / resume / stop, with live state and line. |
+| **Script** | write and run JavaScript with the same commands as the Python SDK; examples, save/open files, live log, Stop. |
+| **Data** | joint speeds/currents/temperatures, digital I/O (tap a DO to switch it), controller log, **record to CSV**. |
+| **Setup** | connect (simulator or real cobot); **payload**; **tool (TCP) slots**, active tool and **4-point tool calibration**; **user frames**; **bridge limits** (floor height, max joint and linear speed); collision sensitivity (view only). Every setting change is read back from the cobot to confirm it took. |
 
-**Going live from the demo:**
-1. Join the cobot's Wi-Fi on both the PC and the iPad.
-2. Double-click `Start iPad Bridge.bat`. It prints the address to open and a 6-digit PIN.
-3. In the demo app, go to **Setup → Go live**, type the address, enter the PIN once, and add it to the Home Screen.
+**STOP** (header) or **Esc** stops all motion and any running program.
 
-The PIN and login are saved in `bridge.json` (never committed), so the iPad stays logged in between restarts. To change the PIN, run:
+## Program it
 
-```bash
-python run.py --lan --pin 4821
+### Python
+
+```python
+from cobot.sdk import Robot
+
+robot = Robot.simulator(powered=True)       # practise with no hardware
+# robot = Robot.bridge()                    # through the running app: watch it in the 3D view
+# robot = Robot.connect("10.5.5.100")       # straight to the real cobot (call robot.arm() to allow motion)
+
+robot.speed(30)                              # percent
+robot.home()
+robot.move_linear(z=200)                     # straight line, keep x/y/orientation
+robot.move_joint([0, 0, 0, 0, 0, 45], relative=True)
+robot.set_do(0, True)
+robot.wait_di(1, True, timeout=10)
 ```
 
-If the iPad can't open the address, Windows Firewall is the usual cause. Allow Python when Windows asks, and tick **Public** networks too: Windows usually labels the cobot's Wi-Fi as public.
+Moves wait until the arm stops and raise `CobotError` on a refused command, a bridge limit, an E-stop, a protective stop or a controller error. Full API: [docs/SCRIPTING.md](docs/SCRIPTING.md). Examples: [examples/](examples/).
 
-## Using the UI
+### In the browser
 
-1. **Power on**, then **Enable**.
-2. **Joint jog / Cartesian jog:** hold − or + to move, release to stop. The jog is hold-to-run: the page sends a keepalive every 100 ms, and the driver stops the arm 350 ms after the keepalive stops. That covers a closed tab or a dropped network.
-3. **Mouse in the 3D view:**
-   - Drag the green TCP ball to set a target. Shift+drag moves it up or down.
-   - A blue ghost arm previews the target. Then click **Move linear** or **Move joint**.
-   - Drag empty space to orbit, right-drag to pan, and use the wheel to zoom.
-4. **Sliders:** set the joint targets (the ghost previews them), then click **Move to sliders**.
-5. **Waypoints:** click **Teach** to store the current pose, and **Play** to run the list in order.
-6. **Speed slider:** sets the speed override (`set_rapidrate`).
-7. **STOP** or **Esc:** stops all motion.
-8. **Cobot setup** (Setup tab): payload, tool (TCP) slots and the active tool, user frames; collision sensitivity is shown view-only. Changes need *Arm motion* ticked and are read back from the cobot to confirm.
-9. **Programs on the cobot** (Points tab): load a program saved on the controller by name, then Run / Pause / Resume / Stop, with its state and current line. Programs run at their own saved speeds.
-10. **Simulator only:** E-stop, Fake collision (protective stop) and the Remote/Local control-source switch. Use these to test your error handling.
+The **Script** tab runs the same commands in JavaScript (`await robot.move_linear({z: 200})`), in the demo or live, with no install. **Points → → Script** turns taught waypoints into a script you can edit.
 
-## Files
+## Safety model
+
+This is an engineering tool, **not a safety function**. The cobot's own safety configuration (set in Cobot Expert), its collision detection and the hardware E-stop protect people. On top of that the bridge adds:
+
+- **read-only until armed** on the real cobot (moves, I/O and setting changes all need *Arm motion*);
+- a **speed limit** applied by the bridge itself (the controller ignores the speed-override command), 10 % on every connect;
+- **floor / joint / reach limits** checked before every move (whole path), and a jog heading down stops at the floor;
+- **hold-to-run jog** with a 350 ms dead-man;
+- **safety settings are never sent** (collision sensitivity, limits, zones): change those in Cobot Expert.
+
+Programs stored on the controller run at their own saved speeds: the bridge limits don't apply to them.
+
+## What still needs Cobot Expert
+
+Safety configuration, creating/editing programs stored on the controller, user accounts, network settings and firmware updates. See [docs/COBOT_EXPERT_PARITY.md](docs/COBOT_EXPERT_PARITY.md) for the full comparison.
+
+## Develop
+
+```bash
+python -m tests.test_e2e     # driver + simulator over real sockets
+python -m tests.test_sdk     # the Python SDK, scripted like a user would
+```
+
+Releases: `git tag v1.0.1 && git push origin v1.0.1` builds `LexiumCobot.exe` and publishes it (`.github/workflows/release.yml`). Every push to `main` redeploys the demo.
 
 | File | Purpose |
 |---|---|
-| `cobot/kinematics.py` | FK/IK, model profiles, joint limits |
-| `cobot/regmap.py` | Schneider's official Modbus address table (V1.7) |
-| `cobot/modbus.py` | Modbus TCP server and client (FC 1–6, 15, 16) |
-| `cobot/sim_robot.py` | virtual arm: state machine, jog, MoveJ/MoveL, limits, I/O |
-| `cobot/jaka_proto.py` | JSON remote protocol, server (sim) and client (PC) |
-| `cobot/sim_server.py` | virtual controller exposing all ports |
-| `cobot/driver.py` | one API for sim or real, with read-only guard and jog watchdog |
-| `cobot/web.py`, `cobot/static/index.html` | UI server and page |
-| `docs/RESEARCH.md` | research findings and sources |
-| `docs/REAL_HARDWARE.md` | step-by-step plan for connecting to your physical cobot |
-| `docs/TM262_ROADMAP.md` | path to Machine Expert and the TM262 |
+| `cobot/sdk.py` | Python SDK (`Robot`) |
+| `cobot/driver.py` | one API for sim or real: read-only guard, speed limit, bridge limits, jog watchdog |
+| `cobot/jaka_proto.py` | JAKA JSON protocol: client (TLS) and simulator server |
+| `cobot/sim_robot.py`, `cobot/sim_server.py` | the simulated controller |
+| `cobot/kinematics.py` | FK/IK with the DH parameters read from the real controller |
+| `cobot/web.py`, `cobot/static/` | the page (also runs standalone as the demo) |
+| `cobot/cli.py` | the launcher (`lexium-cobot`, `run.py`, the .exe) |
+| `ipad.py` | the bridge for a-Shell on iPad |
+| `docs/` | real-hardware notes, iPad guide, scripting guide, research, TM262 roadmap |

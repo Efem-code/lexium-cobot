@@ -1,20 +1,37 @@
 """Per-user settings file (bridge limits, PIN, ...), shared by run.py, ipad.py and installs.
 
 Windows: %APPDATA%\\LexiumCobot\\settings.json ; elsewhere: ~/.lexium-cobot/settings.json
+(iPad/a-Shell, where only ~/Documents is writable: ~/Documents/.lexium-cobot)
 """
 import json
 import os
+import tempfile
+
+_dir = None
 
 
 def config_dir():
-    if os.environ.get("LEXIUM_COBOT_HOME"):  # tests / portable installs
-        d = os.environ["LEXIUM_COBOT_HOME"]
-        os.makedirs(d, exist_ok=True)
-        return d
-    base = os.environ.get("APPDATA")
-    d = os.path.join(base, "LexiumCobot") if base else os.path.join(os.path.expanduser("~"), ".lexium-cobot")
-    os.makedirs(d, exist_ok=True)
-    return d
+    global _dir
+    if _dir:
+        return _dir
+    home = os.path.expanduser("~")
+    candidates = [os.environ.get("LEXIUM_COBOT_HOME")]  # tests / portable installs
+    if os.environ.get("APPDATA"):
+        candidates.append(os.path.join(os.environ["APPDATA"], "LexiumCobot"))
+    candidates += [os.path.join(home, ".lexium-cobot"), os.path.join(home, "Documents", ".lexium-cobot"),
+                   os.path.join(tempfile.gettempdir(), "lexium-cobot")]
+    for d in filter(None, candidates):
+        try:
+            os.makedirs(d, exist_ok=True)
+            probe = os.path.join(d, ".write-test")
+            with open(probe, "w"):
+                pass
+            os.remove(probe)
+            _dir = d
+            return d
+        except OSError:
+            continue
+    raise OSError("no writable folder for settings")
 
 
 def path():
@@ -39,4 +56,7 @@ def save(data):
 def update(key, value):
     data = load()
     data[key] = value
-    save(data)
+    try:
+        save(data)
+    except OSError:
+        pass  # settings are a convenience: never stop the robot code over them
