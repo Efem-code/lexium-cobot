@@ -294,6 +294,72 @@ $("limSet").onclick = guard(async () => {
   if (r && r.limits) { S.limits = r.limits; showLimits(); cfgMsg("Bridge limits saved.", true); }
 });
 
+// ------------------------------------------------------------ TCP calibration (4+ poses touching one point)
+// For each pose: R_i t + p_i = P  ->  [R_i  -I] [t; P] = -p_i, solved by least squares.
+// t = tool offset in the flange frame, P = the touched point in the base frame.
+let tcpPoses = [];
+function solveLin(A, b) {   // Gaussian elimination with partial pivoting
+  const n = A.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-9) throw new Error("singular");
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((r, i) => r[n] / r[i]);
+}
+function calibrateTcp(jointsList, model) {
+  const arm = new CobotSim.Arm(model);   // bare flange (tool = 0)
+  const F = jointsList.map(q => arm.frames(q)[6]);
+  const N = Array.from({length: 6}, () => [0, 0, 0, 0, 0, 0]), v = [0, 0, 0, 0, 0, 0];
+  for (const T of F) for (let r = 0; r < 3; r++) {
+    const row = [T[r][0], T[r][1], T[r][2], r === 0 ? -1 : 0, r === 1 ? -1 : 0, r === 2 ? -1 : 0], rhs = -T[r][3];
+    for (let i = 0; i < 6; i++) { v[i] += row[i] * rhs; for (let j = 0; j < 6; j++) N[i][j] += row[i] * row[j]; }
+  }
+  const u = solveLin(N, v), t = u.slice(0, 3), P = u.slice(3);
+  const errs = F.map(T => Math.hypot(...[0, 1, 2].map(r => T[r][0] * t[0] + T[r][1] * t[1] + T[r][2] * t[2] + T[r][3] - P[r])));
+  return {t, P, maxErr: Math.max(...errs), rmsErr: Math.sqrt(errs.reduce((s, e) => s + e * e, 0) / errs.length)};
+}
+const tcpBtn = () => { $("tcpRec").textContent = `Record pose (${tcpPoses.length})`; };
+$("tcpRec").onclick = () => {
+  if (!S.joints) { toast("No live joint data"); return; }
+  tcpPoses.push(S.joints.slice()); tcpBtn();
+  $("tcpMsg").textContent = tcpPoses.length < 4 ? `${4 - tcpPoses.length} more pose(s) needed; change the angle a lot each time.` : "Enough poses: press Calculate (more poses = better).";
+};
+$("tcpReset").onclick = () => { tcpPoses = []; tcpBtn(); $("tcpMsg").textContent = ""; };
+$("tcpCalc").onclick = () => {
+  if (tcpPoses.length < 4) { $("tcpMsg").textContent = "Record at least 4 poses first."; return; }
+  let r;
+  try { r = calibrateTcp(tcpPoses, S.model || "LXMRL03"); }
+  catch (_) { $("tcpMsg").textContent = "Can't solve: the poses are too similar. Tilt the tool much more between poses."; return; }
+  const good = r.maxErr < 1.5;
+  r.t.forEach((v, k) => $("to" + k).value = +v.toFixed(2));
+  for (let k = 3; k < 6; k++) if ($("to" + k).value === "") $("to" + k).value = 0;
+  $("tcpMsg").innerHTML = `Tool point X ${r.t[0].toFixed(2)}, Y ${r.t[1].toFixed(2)}, Z ${r.t[2].toFixed(2)} mm from the flange · ` +
+    `fit error ${r.rmsErr.toFixed(2)} mm (worst ${r.maxErr.toFixed(2)})` + (good ? " ✓ Filled in above; pick a slot and press Save slot." :
+    " ✗ Too large: the tip didn't stay on one point, or the poses are too similar. Reset and try again.");
+};
+
+// ------------------------------------------------------------ data recording (CSV)
+let rec = null;   // {rows, t0}
+$("recBtn").onclick = () => {
+  if (rec && rec.on) { rec.on = false; $("recBtn").textContent = "● Record"; $("recBtn").classList.remove("on"); $("recSave").disabled = !rec.rows.length; return; }
+  rec = {on: true, rows: [], t0: Date.now()}; $("recBtn").textContent = "■ Stop"; $("recBtn").classList.add("on"); $("recSave").disabled = true;
+};
+function recSample() {
+  if (!rec || !rec.on || !S.joints) return;
+  const bits = a => (a || []).slice(0, 16).map(v => v ? 1 : 0).join("");
+  rec.rows.push([((Date.now() - rec.t0) / 1000).toFixed(3), ...S.joints.map(v => v.toFixed(3)), ...(S.tcp || []).map(v => v.toFixed(3)),
+    ...(S.joint_speed || []).map(v => v.toFixed(2)), S.enabled ? 1 : 0, S.inpos ? 1 : 0, bits(S.din), bits(S.dout)]);
+  if (rec.rows.length >= 200000) $("recBtn").onclick();   // ~3 h at 20 Hz
+  $("recMsg").textContent = `Recording: ${rec.rows.length} samples, ${((Date.now() - rec.t0) / 1000).toFixed(0)} s`;
+}
+$("recSave").onclick = () => {
+  if (!rec || !rec.rows.length) return;
+  const head = ["t_s", ...JN.map(n => n + "_deg"), "x_mm", "y_mm", "z_mm", "rx_deg", "ry_deg", "rz_deg", ...JN.map(n => n + "_deg_s"), "enabled", "inpos", "din0_15", "dout0_15"];
+  download(`cobot-recording-${stamp()}.csv`, [head, ...rec.rows].map(r => r.join(",")).join("\n") + "\n", "text/csv");
+};
+
 // ------------------------------------------------------------ programs stored on the cobot
 let progNames = [], P = {state: null}, progPolled = 0;
 try { progNames = JSON.parse(localStorage.getItem("progNames") || "[]"); } catch (_) {}
@@ -556,6 +622,7 @@ $("scStop").onclick = () => { if (scRun) scRun.aborted = true; api("/api/stop", 
 let shownMode = null;
 function pill(id, cls, txt) { const p = $(id); p.className = "pill " + cls; if (txt) p.textContent = txt; }
 function render() {
+  recSample();
   const P = S.ports || {};
   pill("pMode", S.connected ? "ok" : "bad", S.mode === "demo" ? "DEMO" : S.connected ? (S.mode === "sim" ? "SIMULATOR" : "REAL " + S.host) : (S.bridge_down ? "bridge offline" : "offline"));
   // Modbus is optional on the real cobot when the (TLS) status stream is up

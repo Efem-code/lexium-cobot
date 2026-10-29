@@ -86,6 +86,8 @@ td:first-child,th:first-child{text-align:left}
 .ok-msg{color:#bff5c9}
 #scCode{width:100%;min-height:260px;resize:vertical;font:12px/1.45 Consolas,ui-monospace,monospace;color:var(--text);background:#111214;border:1px solid var(--line);border-radius:6px;padding:8px;tab-size:2;margin-top:6px}
 #scOut{max-height:160px;margin-top:6px;white-space:pre-wrap}
+.calib summary{cursor:pointer;color:var(--accent);margin-top:4px}
+#recBtn.on{background:#5a1d20;border-color:var(--bad)}
 #scOut .e{color:#ffb4b6}
 .wp .mv{min-width:30px;padding:3px 6px;font-weight:700}
 .wp .mv.L{color:var(--accent);border-color:var(--accent)}
@@ -213,6 +215,11 @@ td:first-child,th:first-child{text-align:left}
         <div class="row"><label class="f" style="flex:1">Slot<select id="toolSlot"></select></label></div>
         <div class="grid6" id="toolOff"></div>
         <div class="row"><button id="toolSet" class="wbtn">Save slot</button><button id="toolUse" class="wbtn">Use this tool</button></div>
+        <details class="calib"><summary>Measure the tool point (4-point calibration)</summary>
+          <div class="note" style="margin:4px 0">Touch the tool tip to one fixed point (a sharp pin) from 4 or more clearly different angles, pressing <b>Record</b> at each. <b>Calculate</b> fills X/Y/Z above; then press Save slot.</div>
+          <div class="row"><button id="tcpRec">Record pose (0)</button><button id="tcpCalc">Calculate</button><button id="tcpReset">Reset</button></div>
+          <div class="note" id="tcpMsg"></div>
+        </details>
 
         <div class="cfgh">User frame <span class="note" style="margin:0">active: <b id="userAct">—</b></span></div>
         <div class="row"><label class="f" style="flex:1">Slot<select id="userSlot"></select></label></div>
@@ -252,7 +259,9 @@ td:first-child,th:first-child{text-align:left}
     </div>
 
     <div class="card" data-tab="data">
-      <h2>Live data</h2>
+      <div class="row" style="justify-content:space-between"><h2>Live data</h2>
+        <div class="row"><button id="recBtn">● Record</button><button id="recSave" disabled>Save CSV</button></div></div>
+      <div class="note" id="recMsg" style="margin:0 0 6px">Records joints, TCP, speeds and I/O at the live update rate.</div>
       <table class="mono" id="live"></table>
       <div class="row" style="margin-top:6px;color:var(--mute)">Cabinet <b id="cab" style="color:var(--text)">—</b></div>
     </div>
