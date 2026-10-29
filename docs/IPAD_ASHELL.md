@@ -1,7 +1,11 @@
 # iPad only: run the bridge in a-Shell
 
 No PC needed. The bridge (plain Python) runs on the iPad in the free **a-Shell**
-app, and Safari on the same iPad opens it at `http://127.0.0.1:8765`.
+app, and the page opens full screen inside a-Shell's own built-in browser, so it's
+all one app: no Split View, and nothing gets paused.
+
+**Switching:** swipe in from the **right edge** to go from the terminal to the page,
+and from the **left edge** to go back to the terminal.
 
 ## One-time setup (iPad on a Wi-Fi with internet)
 
@@ -16,9 +20,10 @@ app, and Safari on the same iPad opens it at `http://127.0.0.1:8765`.
    python3 ipad.py --sim
    ```
 
-3. Open Safari at `http://127.0.0.1:8765`. You should see the simulator.
-   This checks everything works before you go near the cobot.
-4. Back in a-Shell press **Ctrl+C** (on-screen keyboard: the `^` key, then `c`) to stop.
+3. The page opens by itself after a second, showing the simulator. This checks
+   everything works before you go near the cobot.
+   If it doesn't open, type `internalbrowser http://127.0.0.1:8765` in a new a-Shell window.
+4. Swipe back to the terminal and press **Ctrl+C** (on-screen keyboard: the `^` key, then `c`) to stop.
 
 ## Using it with the cobot
 
@@ -33,15 +38,16 @@ app, and Safari on the same iPad opens it at `http://127.0.0.1:8765`.
 
    The first time, iPadOS asks whether a-Shell may find devices on your **local network**: tap **Allow**.
    If you tapped Don't Allow, turn it on in **Settings → a-Shell → Local Network**.
-3. Put a-Shell and Safari **side by side** (Split View: drag Safari up from the Dock onto the
-   side of the screen). iPadOS pauses apps that are off screen, and the bridge stops with it.
-   If that happens mid-jog, the jog watchdog stops the arm.
-4. In Safari open `http://127.0.0.1:8765`. The page connects to the cobot by itself
+3. The page opens inside a-Shell and connects to the cobot by itself
    (header shows **REAL 10.5.5.100**). It is **read-only** until you tick
    *Arm motion on real cobot* in Setup.
+4. Keep a-Shell as the app on screen. If you switch to another app, iPadOS pauses
+   a-Shell and the bridge stops with it; if that happens mid-jog, the jog watchdog
+   stops the arm.
 
 Options: `python3 ipad.py --host 10.5.5.101` for a different controller address,
-`--sim` for the built-in simulator.
+`--sim` for the built-in simulator, `--safari` to skip the built-in browser and use
+Safari instead (then a-Shell has to stay on screen in Split View).
 
 ## Updating to a newer version
 

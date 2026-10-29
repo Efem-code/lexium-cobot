@@ -342,20 +342,20 @@ function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); W = rect.width; H = rect.height; F = Math.min(H * 1.25, W * 1.6); B = camBasis();
   ctx.clearRect(0, 0, W, H);
   const reach = (profiles[S.model] && profiles[S.model].reach) || 900, ext = Math.ceil(reach * 1.6 / 100) * 100;
-  for (let v = -ext; v <= ext; v += 100) { const c = v === 0 ? "#3a4757" : "#1f2933"; line([v, -ext, 0], [v, ext, 0], c, 1); line([-ext, v, 0], [ext, v, 0], c, 1); }
-  ctx.strokeStyle = "rgba(61,205,88,.18)"; ctx.setLineDash([6, 6]); ctx.beginPath();
+  for (let v = -ext; v <= ext; v += 100) { const c = v === 0 ? "#4a4c51" : "#26282b"; line([v, -ext, 0], [v, ext, 0], c, 1); line([-ext, v, 0], [ext, v, 0], c, 1); }
+  ctx.strokeStyle = "rgba(232,100,42,.25)"; ctx.setLineDash([6, 6]); ctx.beginPath();
   for (let a = 0; a <= 64; a++) { const P = proj([reach * Math.cos(a / 64 * 6.283), reach * Math.sin(a / 64 * 6.283), 0]); if (P) a ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1]); }
   ctx.stroke(); ctx.setLineDash([]);
   drawFrame([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 200, .9);
   const bp = []; for (let a = 0; a <= 32; a++) { const P = proj([95 * Math.cos(a / 32 * 6.283), 95 * Math.sin(a / 32 * 6.283), 0]); if (P) bp.push(P); }
-  ctx.fillStyle = "#2a323c"; ctx.beginPath(); bp.forEach((P, i) => i ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1])); ctx.fill();
+  ctx.fillStyle = "#2e3034"; ctx.beginPath(); bp.forEach((P, i) => i ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1])); ctx.fill();
   if (ghost) drawArm(ghost.points, .35, true);
   drawArm(S.points, 1, false);
   tcpScreen = null; targetScreen = null;
   if (S.tcp) {
     const p = S.tcp.slice(0, 3);
     drawFrame(p, rpyR(S.tcp[3], S.tcp[4], S.tcp[5]), 90, 1);
-    const P = proj(p); if (P) { tcpScreen = P; ctx.fillStyle = drag && drag.kind === "tcp" ? "#fff" : "#3dcd58"; ctx.beginPath(); ctx.arc(P[0], P[1], 10, 0, 7); ctx.fill(); ctx.strokeStyle = "#0b0e12"; ctx.lineWidth = 2; ctx.stroke(); }
+    const P = proj(p); if (P) { tcpScreen = P; ctx.fillStyle = drag && drag.kind === "tcp" ? "#fff" : "#e8642a"; ctx.beginPath(); ctx.arc(P[0], P[1], 10, 0, 7); ctx.fill(); ctx.strokeStyle = "#0b0e12"; ctx.lineWidth = 2; ctx.stroke(); }
   }
   if (target) {
     const p = target.pose.slice(0, 3), P = proj(p), G = proj([p[0], p[1], 0]);

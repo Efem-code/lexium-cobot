@@ -48,7 +48,7 @@ On the iPad, open either address in Safari, then tap **Share → Add to Home Scr
 
 **Why a bridge?** Browsers can only make web requests. The cobot speaks Modbus TCP and raw TCP sockets, so something on its network has to translate, even when the iPad is on the cobot's own Wi-Fi. The bridge is `run.py`, running on a PC. Later it could run on a small always-on box such as a Raspberry Pi next to the cobot.
 
-**iPad only, no PC:** the bridge also runs on the iPad itself in the free a-Shell app (`python3 ipad.py`). See [docs/IPAD_ASHELL.md](docs/IPAD_ASHELL.md).
+**iPad only, no PC:** the bridge also runs on the iPad itself in the free a-Shell app (`python3 ipad.py`), with the page opening inside a-Shell. See [docs/IPAD_ASHELL.md](docs/IPAD_ASHELL.md).
 
 **Going live from the demo:**
 1. Join the cobot's Wi-Fi on both the PC and the iPad.

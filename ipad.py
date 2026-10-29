@@ -6,10 +6,14 @@ In a-Shell:
     python3 ipad.py --sim        practise against the built-in simulator instead
     python3 ipad.py --host 10.5.5.101
 
-Then open http://127.0.0.1:8765 in Safari, side by side with a-Shell (Split View):
-iPadOS pauses a-Shell when it is off screen, and the bridge stops with it.
+The page opens inside a-Shell's own browser (internalbrowser), so the bridge and the
+page are one app and nothing gets paused. Swipe from the right/left edge to switch
+between the page and the terminal. --safari skips that; then keep a-Shell on screen
+(Split View), because iPadOS pauses it when it is hidden.
 """
 import argparse
+import os
+import sys
 import threading
 import time
 
@@ -19,12 +23,22 @@ from cobot.sim_server import VirtualController
 from cobot.web import serve
 
 
+def on_ios():
+    if sys.platform == "ios":
+        return True
+    try:
+        return sys.platform == "darwin" and os.uname().machine.startswith(("iPad", "iPhone"))
+    except AttributeError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--host", default="10.5.5.100", help="cobot controller address")
     ap.add_argument("--sim", action="store_true", help="use the built-in simulator, not the real cobot")
     ap.add_argument("--model", default="LXMRL03", choices=list(PROFILES))
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--safari", action="store_true", help="don't open a-Shell's built-in browser")
     a = ap.parse_args()
 
     drv = CobotDriver()
@@ -49,7 +63,12 @@ def main():
         threading.Thread(target=go, daemon=True).start()
 
     httpd = serve("127.0.0.1", a.port, drv)  # localhost only: nothing else on the Wi-Fi can reach it
-    print(f"\n  Open in Safari:  http://127.0.0.1:{a.port}\n  Stop: Ctrl+C (or close a-Shell)\n")
+    url = f"http://127.0.0.1:{a.port}"
+    print(f"\n  Page: {url}\n  Stop: Ctrl+C (or close a-Shell)\n")
+    if on_ios() and not a.safari:
+        # a-Shell's in-app WebView: page and bridge stay in one foreground app
+        threading.Timer(1.0, lambda: os.system(f"internalbrowser {url}")).start()
+        print("  Opening the page in a-Shell's browser. Swipe from the edge to get back here.\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
