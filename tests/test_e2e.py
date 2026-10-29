@@ -4,10 +4,13 @@ Run:  python -m tests.test_e2e     (from the lexium-cobot folder)
 Uses non-default ports so it can run while the app is up.
 """
 import math
+import os
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, ".")
+os.environ["LEXIUM_COBOT_HOME"] = tempfile.mkdtemp(prefix="cobot-test-")  # never touch real settings
 from cobot import kinematics as K  # noqa: E402
 from cobot import regmap as RM  # noqa: E402
 from cobot.driver import CobotDriver  # noqa: E402
@@ -110,6 +113,44 @@ tcp = d.status()["tcp"]
 # direction check; distance varies 10-25 mm with machine load
 check("cart jog moved +Z", tcp[2] - z0 > 3, f"dz {tcp[2]-z0:.1f}")
 
+# bridge limits (checked before anything is sent)
+from cobot.driver import LimitError  # noqa: E402
+d.jog_stop()
+time.sleep(0.2)
+
+
+def refused(name, **f):
+    try:
+        d.command(name, **f)
+        return False
+    except LimitError:
+        return True
+
+
+check("joint target outside limits refused", refused("joint_move", relFlag=0, jointPosition=[0, 300, -90, 90, 90, 0], speed=20, accel=100))
+d.set_limits(z_min=d.status()["tcp"][2] + 50)
+check("move below the floor limit refused", refused("joint_move", relFlag=0, jointPosition=K.HOME, speed=20, accel=100))
+d.set_limits(z_min=-1000)
+check("unreachable moveL refused", refused("moveL", relFlag=0, cartPosition=[3000, 0, 300, 180, 0, 0], speed=50, accel=500))
+d.set_limits(joint_speed_max=5)
+check("speed capped to the joint limit", d._check_motion("joint_move", dict(relFlag=0, jointPosition=list(d.status()["joints"]), speed=90))["speed"] == 5)
+d.set_limits(joint_speed_max=120, z_min=0)
+# floor stop while jogging down
+r = d.command("joint_move", relFlag=0, jointPosition=[0, 90, -90, 90, 90, 0], speed=90, accel=300)
+wait(lambda: d.status()["inpos"] and abs(d.status()["joints"][2] + 90) < 0.1)
+zf = d.status()["tcp"][2]
+d.set_limits(z_min=zf - 15)
+d.jog_start("base", 2, -1, 40)
+for _ in range(15):
+    time.sleep(0.1)
+    d.jog_keepalive()
+time.sleep(0.2)
+zs = d.status()["tcp"][2]
+check("jog down stops at the floor limit", zf - 30 < zs < zf - 10 and not d.status()["jogging"], f"z {zs:.1f} vs limit {zf - 15:.1f}")
+d.set_limits(z_min=-1000)
+check("limits saved to the settings file", __import__("cobot.settings", fromlist=["load"]).load()["limits"]["z_min"] == -1000)
+d.set_limits(z_min=0)
+
 # IO through Modbus
 d.command("set_digital_output", type=0, index=3, value=1)
 check("DO3 visible on Modbus discrete input 11", wait(lambda: d.status()["dout"][3] == 1))
@@ -144,6 +185,7 @@ time.sleep(0.1)  # the sim recomputes the TCP on its next tick
 tcp1 = d.command("get_tcp_pos")["tcp_pos"]
 check("active tool 2 moves the TCP 100 mm", d.command("get_data")["current_tool_id"] == 2
       and abs(math.dist(tcp0[:3], tcp1[:3]) - 100) < 0.01)
+check("bridge model uses the active tool", d.status()["tool"][2] == 100 and d.status()["tool_id"] == 2)
 d.command("set_tool_id", tool_id=0)
 d.command("set_user_offsets", id=1, userffset=[10, 0, 0, 0, 0, 0], name="user1")
 d.command("set_user_id", user_frame_id=1)

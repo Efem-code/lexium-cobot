@@ -213,6 +213,15 @@ td:first-child,th:first-child{text-align:left}
         <div class="grid6" id="userOff"></div>
         <div class="row"><button id="userSet" class="wbtn">Save slot</button><button id="userUse" class="wbtn">Use this frame</button></div>
 
+        <div class="cfgh">Bridge limits <span class="note" style="margin:0">(checked by this app before every move)</span></div>
+        <div class="grid4" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+          <label class="f">Floor Z mm<input id="limZ" inputmode="decimal"></label>
+          <label class="f">Joint °/s max<input id="limJ" inputmode="decimal"></label>
+          <label class="f">Linear mm/s max<input id="limL" inputmode="decimal"></label>
+        </div>
+        <div class="note" style="margin:0">Moves whose tool tip would pass below the floor are refused; a jog heading down stops there. Speeds are capped before the speed slider applies.</div>
+        <button id="limSet">Save limits</button>
+
         <div class="cfgh">Safety <span class="note" style="margin:0">(view only; change in Cobot Expert)</span></div>
         <div class="light">Collision sensitivity: <b id="clsn" style="color:var(--text)">—</b></div>
       </div>

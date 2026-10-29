@@ -132,6 +132,8 @@ class Handler(BaseHTTPRequestHandler):
             elif p == "/api/cmd":
                 name = body.pop("cmdName")
                 r = d.command(name, **body)
+            elif p == "/api/limits":
+                r = {"limits": d.set_limits(**body)}
             elif p == "/api/jog":
                 r = d.jog_start(body["coord"], int(body["axis"]), int(body["dir"]),
                                 float(body.get("speed", 10)))

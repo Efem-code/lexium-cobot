@@ -343,12 +343,43 @@ class LocalTransport {
     try { model = localStorage.getItem("demoModel") || model; } catch (_) {}
     this.robot = new SimRobot(PROFILES[model] ? model : "LXMRL03");
     this.jogActive = false; this.jogLast = 0; this.lastError = "";
+    // same bridge limits as driver.py
+    this.limits = {z_min: 0, joint_speed_max: 120, linear_speed_max: 500};
+    try { Object.assign(this.limits, JSON.parse(localStorage.getItem("demoLimits") || "{}")); } catch (_) {}
+    this.jogZ = null;
     let last = performance.now(), acc = 0;
     setInterval(() => {
       const now = performance.now(); acc += Math.min(0.1, (now - last) / 1000); last = now;
       while (acc >= 0.01) { this.robot.step(0.01); acc -= 0.01; }
       if (this.jogActive && now - this.jogLast > 350) { this.jogActive = false; this.robot.stop(); }   // dead-man watchdog
+      if (this.jogActive) {   // floor limit: stop a jog heading down through z_min
+        const z = this.robot.tcp[2];
+        if (z < this.limits.z_min && this.jogZ != null && z < this.jogZ - 0.05) {
+          this.jogActive = false; this.robot.stop(); this.lastError = `jog stopped at the floor limit (Z ${z.toFixed(0)} mm)`;
+        }
+        this.jogZ = z;
+      } else this.jogZ = null;
     }, 10);
+  }
+  checkLimits(name, f) {
+    const L = this.limits, r = this.robot, below = z => z < L.z_min - 1e-6;
+    const floorMsg = z => `path goes below the floor limit (TCP Z ${z.toFixed(0)} mm < ${L.z_min.toFixed(0)} mm)`;
+    const jointPath = (q0, q1) => {
+      if (!withinLimits(q1)) return "target outside joint limits";
+      for (let k = 0; k <= 24; k++) { const z = r.arm.fk(q0.map((a, i) => a + (q1[i] - a) * k / 24))[2]; if (below(z)) return floorMsg(z); }
+      return null;
+    };
+    if (name === "joint_move") {
+      const q1 = f.relFlag ? r.q.map((v, i) => v + +f.jointPosition[i]) : f.jointPosition.map(Number);
+      f.speed = Math.min(+(f.speed ?? 20), L.joint_speed_max);
+      return jointPath(r.q, q1);
+    }
+    if (name === "moveL") {
+      const t = f.relFlag ? r.tcp.map((v, i) => v + +f.cartPosition[i]) : f.cartPosition.map(Number);
+      for (const z of [r.tcp[2], t[2]]) if (below(z)) return floorMsg(z);
+      f.speed = Math.min(+(f.speed ?? 50), L.linear_speed_max);
+    }
+    return null;
   }
   cmd(name, f = {}) {
     const r = this.robot.command(Object.assign({cmdName: name}, f));
@@ -367,7 +398,7 @@ class LocalTransport {
       inpos: !r.motion && !r.jog, motion_mode: r.motion ? "servo position" : "jog/other", speed_ratio: r.rapidRate * 100,
       errcode: r.errcode, errmsg: r.errmsg, cab_temp: r.cabTemp, cab_power: on ? 120 : 25,
       dout: r.dout.slice(0, 16), din: r.din.slice(0, 16), points: r.arm.jointPoints(r.q),
-      control_source: r.controlSource, log: r.log.slice(-10),
+      control_source: r.controlSource, log: r.log.slice(-10), limits: {...this.limits}, tool: r.arm.tool.slice(), tool_id: r.toolId,
     };
   }
   async call(path, b = {}) {
@@ -377,10 +408,20 @@ class LocalTransport {
         case "/api/models": return {profiles: PROFILES, limits: JOINT_LIMITS, home: HOME};
         case "/api/state": return this.status();
         case "/api/connect": case "/api/disconnect": case "/api/arm": return {ok: true};
-        case "/api/cmd": { const {cmdName, ...rest} = b; return this.cmd(cmdName, rest); }
+        case "/api/cmd": {
+          const {cmdName, ...rest} = b;
+          const why = this.checkLimits(cmdName, rest);
+          if (why) return {errorCode: "403", errorMsg: why, cmdName};
+          return this.cmd(cmdName, rest);
+        }
+        case "/api/limits":
+          for (const k of Object.keys(this.limits)) if (b[k] != null) this.limits[k] = +b[k];
+          try { localStorage.setItem("demoLimits", JSON.stringify(this.limits)); } catch (_) {}
+          return {limits: {...this.limits}};
         case "/api/jog": {
           const cm = {base: 0, joint: 1, tool: 2}[b.coord];
-          const r = this.cmd("jog", {jog_mode: 1, coord_map: cm, jnum: +b.axis, jogvel: +b.speed * (b.dir > 0 ? 1 : -1)});
+          const cap = cm !== 1 && +b.axis < 3 ? this.limits.linear_speed_max : this.limits.joint_speed_max;
+          const r = this.cmd("jog", {jog_mode: 1, coord_map: cm, jnum: +b.axis, jogvel: Math.min(+b.speed, cap) * (b.dir > 0 ? 1 : -1)});
           if (r.errorCode === "0") { this.jogActive = true; this.jogLast = performance.now(); }
           return r;
         }

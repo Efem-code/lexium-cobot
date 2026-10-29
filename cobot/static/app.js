@@ -276,6 +276,18 @@ $("userUse").onclick = guard(() => {
   return writeCfg(`active user frame → ${id}`, "set_user_id", {user_frame_id: id}, a => okR(a.gd) && a.gd.current_user_id === id);
 });
 
+function showLimits() {
+  const L = S.limits || {};
+  for (const [id, k] of [["limZ", "z_min"], ["limJ", "joint_speed_max"], ["limL", "linear_speed_max"]])
+    if (L[k] != null && document.activeElement !== $(id)) $(id).value = L[k];
+}
+$("limSet").onclick = guard(async () => {
+  const body = {z_min: numOf("limZ"), joint_speed_max: numOf("limJ"), linear_speed_max: numOf("limL")};
+  if (body.joint_speed_max <= 0 || body.linear_speed_max <= 0) throw new Error("Speed limits must be above 0");
+  const r = await api("/api/limits", body);
+  if (r && r.limits) { S.limits = r.limits; showLimits(); cfgMsg("Bridge limits saved.", true); }
+});
+
 // ------------------------------------------------------------ programs stored on the cobot
 let progNames = [], P = {state: null}, progPolled = 0;
 try { progNames = JSON.parse(localStorage.getItem("progNames") || "[]"); } catch (_) {}
@@ -336,7 +348,7 @@ function render() {
   if (document.activeElement !== $("arm")) $("arm").checked = !!S.motion_armed;
   // read the cobot's setup + program state once per connection
   const cfgKey = S.connected && !S.bridge_down && (S.joints || S.mode === "demo") ? `${S.mode}|${S.host}` : null;
-  if (cfgKey && cfgKey !== CFG.key) { CFG.key = cfgKey; readCfg().catch(() => {}); pollProg(true); }
+  if (cfgKey && cfgKey !== CFG.key) { CFG.key = cfgKey; readCfg().catch(() => {}); pollProg(true); showLimits(); }
   if (!cfgKey) CFG.key = null;
   const L =[["Power", S.powered, "on"], ["Enabled", S.enabled, "on"], ["E-stop", S.estop, "red"], ["Prot. stop", S.protective_stop, "red"],
              ["Soft limit", S.on_soft_limit, "amber"], ["In position", S.inpos, "on"], ["Jogging", S.jogging, "amber"]];

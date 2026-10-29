@@ -16,6 +16,7 @@ import time
 
 from . import kinematics as K
 from . import regmap as RM
+from . import settings
 from .jaka_proto import JakaClient, JsonStream, open_socket
 from .modbus import ModbusClient
 
@@ -42,6 +43,15 @@ REAL_DEFAULT_SPEED = 0.10
 SCALED_FIELDS = {"joint_move": ("speed", "accel"), "end_move": ("speed", "accel"),
                  "moveL": ("speed", "accel"), "jog": ("jogvel",)}
 
+# Bridge limits, checked before any move is sent (simulator and real cobot alike).
+# z_min: lowest allowed TCP height (mm, base frame), checked along the whole path.
+DEFAULT_LIMITS = dict(z_min=0.0, joint_speed_max=120.0, linear_speed_max=500.0)
+PATH_SAMPLES = 24
+
+
+class LimitError(PermissionError):
+    """A move was refused by the bridge's own limits (nothing was sent)."""
+
 
 class CobotDriver:
     def __init__(self):
@@ -64,6 +74,9 @@ class CobotDriver:
         self.jog_active = None
         self.jog_last = 0.0
         self.speed = 1.0           # bridge-side speed override (real mode), 0.01..1
+        self.limits = dict(DEFAULT_LIMITS, **settings.load().get("limits", {}))
+        self.tool_id = 0
+        self._jog_z = None
         self._gen = 0              # connection generation; old threads exit
         self.history = []          # (t, joints) for plots
 
@@ -97,7 +110,85 @@ class CobotDriver:
                 self.command("sim_set_model", model=model)
             except Exception:
                 pass
+        threading.Thread(target=self.sync_tool, daemon=True).start()
         return self.status()
+
+    def sync_tool(self):
+        """Copy the controller's active tool offset into our kinematic model, so previews,
+        IK and the limit checks use the same TCP the controller reports."""
+        try:
+            offs = self.cmd.send("get_tool_offsets").get("tool_offsets")
+            tid = self.cmd.send("get_data").get("current_tool_id")
+            if offs and tid is not None and 0 <= int(tid) < len(offs):
+                with self.lock:
+                    self.arm.tool = [float(v) for v in offs[int(tid)]]
+                    self.tool_id = int(tid)
+        except Exception:
+            pass  # firmware/sim without tool support: keep the bare flange
+
+    # ----------------------------------------------------------- limits
+    def set_limits(self, **kw):
+        with self.lock:
+            for k, v in kw.items():
+                if k in DEFAULT_LIMITS:
+                    self.limits[k] = float(v)
+            lim = dict(self.limits)
+        settings.update("limits", lim)
+        return lim
+
+    def _now(self):
+        st = self.status()
+        return st.get("joints"), st.get("tcp")
+
+    def _check_joint_path(self, q0, q1):
+        bad = [str(i + 1) for i, (v, (lo, hi)) in enumerate(zip(q1, K.JOINT_LIMITS)) if not lo <= v <= hi]
+        if bad:
+            raise LimitError("target outside joint limits (J" + ", J".join(bad) + ")")
+        z_min = self.limits["z_min"]
+        steps = PATH_SAMPLES if q0 else 0
+        for k in range(steps + 1):
+            t = k / steps if steps else 1.0
+            q = [a + (b - a) * t for a, b in zip(q0, q1)] if q0 else q1
+            z = self.arm.fk(q)[2]
+            if z < z_min - 1e-6:
+                raise LimitError(f"path goes below the floor limit (TCP Z {z:.0f} mm < {z_min:.0f} mm)")
+
+    def _check_motion(self, name, fields):
+        """Refuse moves that break the bridge limits; cap speeds. Returns new fields."""
+        lim, out = self.limits, dict(fields)
+        q0, tcp0 = self._now()
+        if name == "joint_move":
+            tgt = [float(v) for v in out["jointPosition"]]
+            if out.get("relFlag") and q0:
+                tgt = [a + b for a, b in zip(q0, tgt)]
+            self._check_joint_path(q0, tgt)
+            out["speed"] = min(float(out.get("speed", 20)), lim["joint_speed_max"])
+        elif name == "end_move":
+            try:
+                tgt = self.arm.ik([float(v) for v in out["endPosition"]], q0 or K.HOME)
+            except ValueError:
+                raise LimitError("target pose is out of reach")
+            self._check_joint_path(q0, tgt)
+            out["speed"] = min(float(out.get("speed", 20)), lim["joint_speed_max"])
+        elif name == "moveL":
+            tgt = [float(v) for v in out["cartPosition"]]
+            if out.get("relFlag") and tcp0:
+                tgt = [a + b for a, b in zip(tcp0, tgt)]
+            for z in (tcp0[2] if tcp0 else tgt[2], tgt[2]):  # a straight line is lowest at an end
+                if z < lim["z_min"] - 1e-6:
+                    raise LimitError(f"path goes below the floor limit (TCP Z {z:.0f} mm < {lim['z_min']:.0f} mm)")
+            try:
+                q1 = self.arm.ik(tgt, q0 or K.HOME)
+            except ValueError:
+                raise LimitError("target pose is out of reach")
+            if not K.within_limits(q1):
+                raise LimitError("target needs a joint outside its limits")
+            out["speed"] = min(float(out.get("speed", 50)), lim["linear_speed_max"])
+        elif name == "jog" and int(out.get("jog_mode", 0)) == 1:
+            cart = int(out.get("coord_map", 1)) != 1 and int(out.get("jnum", 0)) < 3
+            cap = lim["linear_speed_max"] if cart else lim["joint_speed_max"]
+            out["jogvel"] = max(-cap, min(cap, float(out.get("jogvel", 0))))
+        return out
 
     def disconnect(self):
         with self.lock:
@@ -185,6 +276,19 @@ class CobotDriver:
                 stop = None
                 if self.jog_active and time.time() - self.jog_last > JOG_TIMEOUT:
                     stop, self.jog_active = self.jog_active, None
+            if not stop and self.jog_active:
+                # floor limit: stop a jog that takes the TCP down through z_min
+                # (jogging back up out of it stays allowed)
+                tcp = self._now()[1]
+                if tcp:
+                    z = tcp[2]
+                    if z < self.limits["z_min"] and self._jog_z is not None and z < self._jog_z - 0.05:
+                        with self.lock:
+                            stop, self.jog_active = self.jog_active, None
+                        self.last_error = f"jog stopped at the floor limit (Z {z:.0f} mm)"
+                    self._jog_z = z
+            elif not self.jog_active:
+                self._jog_z = None
             if stop:
                 try:
                     self.cmd.send("jog", **_jog_stop_fields(stop))
@@ -207,6 +311,12 @@ class CobotDriver:
                     self.speed = min(1.0, max(0.01, float(fields.get("rapid_rate", REAL_DEFAULT_SPEED))))
                 return {"errorCode": "0", "errorMsg": "", "cmdName": name, "speed": self.speed}
             fields = self._scaled(name, fields)
+        if name in ("joint_move", "end_move", "moveL", "jog"):
+            try:
+                fields = self._check_motion(name, fields)
+            except LimitError as e:
+                self.last_error = f"{name}: {e}"
+                raise
         try:
             r = self.cmd.send(name, **fields)
             self.cmd_ok = True
@@ -216,6 +326,8 @@ class CobotDriver:
             raise
         if r.get("errorCode") not in ("0", 0):
             self.last_error = f"{name}: {r.get('errorMsg')}"
+        elif name in ("set_tool_id", "set_tool_offsets"):
+            self.sync_tool()
         return r
 
     def _scaled(self, name, fields):
@@ -275,7 +387,8 @@ class CobotDriver:
                        stream_ok=self.stream_ok, motion_armed=self.motion_armed,
                        last_error=self.last_error, jogging=bool(self.jog_active),
                        model=self.arm.model, model_name=self.arm.profile["name"],
-                       tls=self.tls, speed_override=round(self.speed * 100))
+                       tls=self.tls, speed_override=round(self.speed * 100),
+                       limits=dict(self.limits), tool=list(self.arm.tool), tool_id=self.tool_id)
         if not st and ex.get("joint_position"):
             out.update(_state_from_stream(ex))
             try:
