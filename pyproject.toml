@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lexium-cobot"
+dynamic = ["version"]
+description = "Simulator, web controller and Python SDK for the Schneider Lexium Cobot (JAKA-based)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []   # standard library only
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/Efem-code/lexium-cobot"
+Demo = "https://efem-code.github.io/lexium-cobot/"
+
+[project.scripts]
+lexium-cobot = "cobot.cli:main"
+
+[tool.setuptools]
+packages = ["cobot"]
+
+[tool.setuptools.dynamic]
+version = {attr = "cobot.__version__"}
+
+[tool.setuptools.package-data]
+cobot = ["static/*", "static/icons/*"]
