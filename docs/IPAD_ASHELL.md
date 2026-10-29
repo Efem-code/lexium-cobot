@@ -68,5 +68,5 @@ Waypoints are kept: they live in Safari, not in this folder.
   and no PIN is needed.
 - Keep only one app connected to the cobot (close Cobot Expert, stop the PC bridge).
   Several live connections at once overloaded the controller during testing.
-- Login and the Local/Remote switch are not built yet; until then, switch to Remote
-  in Cobot Expert or on the pendant.
+- No Cobot Expert login or Local/Remote switch is needed: jogging from the page was
+  verified with Cobot Expert left on Local.

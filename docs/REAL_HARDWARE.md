@@ -9,13 +9,16 @@ Tested over the controller's Wi-Fi, read-only. Stages 0–1 are done, and part o
 |---|---|
 | Controller | `LXMRL03S0000`, firmware `1.7.0_60_SE_X64`, robot ID `Zu31100019`, name "GuillevinCob" |
 | Wi-Fi | The SSID is the controller serial. The password is unique per unit and printed on the label inside the cabinet door. The controller is at `10.5.5.100`, and the PC gets an address in `10.5.5.x`. |
-| Open ports | 22, 10000, 10001 and 10004. All except 22 use **TLS 1.3** with a self-signed `LXM_Cobot` certificate. A plain TCP connection opens, but no data comes back. |
+| Open ports | 22, 10000, 10001, 10004, 50051 and 50052. All except 22 use **TLS 1.3** with a self-signed `LXM_Cobot` certificate. A plain TCP connection opens, but no data comes back. Port scans are rate-limited by the controller: probe ports one at a time. |
+| Cobot Expert | Talks to the controller over **gRPC on 50051/50052** (login, user levels, Local/Remote control). The gRPC service refuses everything, including reflection, before login ("Access denied"), and its message formats are private, so the app does not use it. |
 | Modbus 502 | Closed (not enabled). Not needed: the app reads state from the 10000 stream instead. |
 | JSON protocol | Works over TLS. Confirmed read-only queries: `get_robot_state`, `get_joint_pos`, `get_tcp_pos`, `get_version` and `get_dh_param`. |
 | Kinematics | JAKA modified DH. `get_dh_param` returns rows `[alpha, a, d, theta-offset]`. With nominal alphas and no theta offsets, the model matches the controller's TCP to 0.3 mm or better. |
 | Load | Each status-stream client receives about 230 KB/s. With several clients connected, the controller stopped accepting connections and Cobot Expert couldn't enable. Keep one app connection at most, and disconnect while using Cobot Expert. |
 
-The driver detects TLS automatically. Not yet tested: anything that changes state (power, enable, jog, move).
+| Jog (29 Oct 2026) | Verified from the page: joint jog (J1 moved only the base) and Cartesian jog (Z+ straight up), **with Cobot Expert left on Local**. No Remote hand-over or login is needed for the JSON command port. JAKA format: `jog_mode` 1 = continuous, 2 = fixed step (needs `poscmd`), 0 = stop; `jnum` is 0-based; a stop must carry the same `coord_map` + `jnum`. |
+
+The driver detects TLS automatically. Not yet tested on the real arm: power on/enable from the page, `joint_move` / `moveL`, waypoint playback.
 
 ## Stage 0: network
 1. Find the controller IP in Cobot Expert: **Cobot connection icon → Robot IP**.
@@ -54,7 +57,7 @@ Stage 2 checks whether the Schneider firmware exposes JAKA's port 10001.
    - Adapt `cobot/jaka_proto.py`. The driver and UI won't change.
 
 ## Stage 3: mouse control
-1. In Cobot Expert, a Technician or Administrator user clicks **Remote Control** to hand the control source to Remote.
+1. Close Cobot Expert, or leave it on **Local**. (Verified: the JSON command port does not need the Remote hand-over.)
 2. Set speed override to **10%** in the header.
 3. Tick **Arm motion on real cobot** and confirm.
 4. Click **Power on**, then **Enable**.

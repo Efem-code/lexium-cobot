@@ -225,7 +225,9 @@ function render() {
   }
   if (document.activeElement !== $("arm")) $("arm").checked = !!S.motion_armed;
   const L =[["Power", S.powered, "on"], ["Enabled", S.enabled, "on"], ["E-stop", S.estop, "red"], ["Prot. stop", S.protective_stop, "red"],
-             ["Soft limit", S.on_soft_limit, "amber"], ["In position", S.inpos, "on"], ["Jogging", S.jogging, "amber"], ["Remote ctl", S.control_source === "remote", "on"]];
+             ["Soft limit", S.on_soft_limit, "amber"], ["In position", S.inpos, "on"], ["Jogging", S.jogging, "amber"]];
+  // the real controller doesn't report a control source; only the simulator models it
+  if (S.mode !== "real") L.push(["Remote ctl", S.control_source === "remote", "on"]);
   $("lights").innerHTML = L.map(([n, v, c]) => `<div class="light"><span class="dot ${v ? c : ""}"></span>${n}</div>`).join("") +
     `<div class="light" style="grid-column:1/-1">Mode: <b style="color:var(--text)">${S.motion_mode || "—"}</b>${S.errcode ? ` · <b style="color:var(--bad)">Err ${S.errcode}${S.errmsg ? ": " + S.errmsg : ""}</b>` : ""}</div>`;
   $("bEstop").textContent = S.estop ? "Release E-stop" : "E-stop";
