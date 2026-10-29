@@ -178,21 +178,35 @@ function drawWps() {
   });
 }
 let playing = false;
+try { $("loop").checked = localStorage.getItem("loop") === "1"; $("dwell").value = localStorage.getItem("dwell") || "0"; } catch (_) {}
+$("loop").onchange = e => { try { localStorage.setItem("loop", e.target.checked ? "1" : "0"); } catch (_) {} };
+$("dwell").onchange = e => { try { localStorage.setItem("dwell", e.target.value); } catch (_) {} };
+const sleep = ms => new Promise(res => setTimeout(res, ms));
 async function playWps() {
   if (playing) { playing = false; $("bPlay").textContent = "Play"; api("/api/stop", {}); return; }
   if (!waypoints.length) return;
   playing = true; $("bPlay").textContent = "Stop play";
-  for (const w of waypoints) {
-    if (!playing) break;
-    const r = await cmd("joint_move", {relFlag: 0, jointPosition: w.joints, speed: jspeed(), accel: 100});
-    if (r.errorCode !== "0") break;
-    await new Promise(res => setTimeout(res, 250));
-    while (playing && S.inpos === false) await new Promise(res => setTimeout(res, 50));
-  }
+  let cycle = 0;
+  // Loop is re-read every cycle, so unticking it finishes the current cycle and stops.
+  do {
+    cycle++; $("cycles").textContent = "cycle " + cycle;
+    for (const w of waypoints) {
+      if (!playing) break;
+      const r = await cmd("joint_move", {relFlag: 0, jointPosition: w.joints, speed: jspeed(), accel: 100});
+      if (r.errorCode !== "0") { playing = false; break; }
+      await sleep(250);
+      while (playing && S.inpos === false) await sleep(50);
+      // stop the loop on any fault (e-stop, protective stop, disabled)
+      if (S.estop || S.protective_stop || S.enabled === false) { playing = false; toast("Play stopped: robot not ready"); break; }
+      const dwell = Math.max(0, +$("dwell").value || 0);
+      if (playing && dwell) await sleep(dwell * 1000);
+    }
+  } while (playing && $("loop").checked);
   playing = false; $("bPlay").textContent = "Play";
 }
 
 // ------------------------------------------------------------ status rendering
+let shownMode = null;
 function pill(id, cls, txt) { const p = $(id); p.className = "pill " + cls; if (txt) p.textContent = txt; }
 function render() {
   const P = S.ports || {};
@@ -204,7 +218,13 @@ function render() {
   pill("pArm", S.motion_armed ? "ok" : "warn", S.motion_armed ? "motion enabled" : "read-only");
   $("connErr").textContent = S.last_error || "";
   $("simTools").style.display = S.mode === "real" ? "none" : "block";
-  const L = [["Power", S.powered, "on"], ["Enabled", S.enabled, "on"], ["E-stop", S.estop, "red"], ["Prot. stop", S.protective_stop, "red"],
+  // follow the bridge when it connected itself (e.g. ipad.py auto-connects to the real cobot)
+  if ((S.mode === "real" || S.mode === "sim") && S.mode !== shownMode) {
+    shownMode = S.mode; $(S.mode === "real" ? "mReal" : "mSim").onclick();
+    if (S.host) $("host").value = S.host;
+  }
+  if (document.activeElement !== $("arm")) $("arm").checked = !!S.motion_armed;
+  const L =[["Power", S.powered, "on"], ["Enabled", S.enabled, "on"], ["E-stop", S.estop, "red"], ["Prot. stop", S.protective_stop, "red"],
              ["Soft limit", S.on_soft_limit, "amber"], ["In position", S.inpos, "on"], ["Jogging", S.jogging, "amber"], ["Remote ctl", S.control_source === "remote", "on"]];
   $("lights").innerHTML = L.map(([n, v, c]) => `<div class="light"><span class="dot ${v ? c : ""}"></span>${n}</div>`).join("") +
     `<div class="light" style="grid-column:1/-1">Mode: <b style="color:var(--text)">${S.motion_mode || "—"}</b>${S.errcode ? ` · <b style="color:var(--bad)">Err ${S.errcode}${S.errmsg ? ": " + S.errmsg : ""}</b>` : ""}</div>`;

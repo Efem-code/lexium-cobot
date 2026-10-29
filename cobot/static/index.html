@@ -221,6 +221,11 @@ td:first-child,th:first-child{text-align:left}
     </div>
     <div class="card" data-tab="points">
       <div class="row" style="justify-content:space-between"><h2>Waypoints</h2><div class="row"><button id="bTeach">+ Teach</button><button id="bPlay" class="primary">Play</button></div></div>
+      <div class="row" style="color:var(--mute);margin-bottom:6px">
+        <label class="row"><input type="checkbox" id="loop"> Loop continuously</label>
+        <span>pause s <input id="dwell" value="0" inputmode="decimal" style="width:44px"></span>
+        <span id="cycles"></span>
+      </div>
       <div id="wps" style="color:var(--mute)">No waypoints yet.</div>
     </div>
     <div class="card" data-tab="data">
