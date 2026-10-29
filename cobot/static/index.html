@@ -302,6 +302,12 @@ td:first-child,th:first-child{text-align:left}
         <div style="color:var(--mute);font-size:12px;margin-top:4px">One output (spring-return gripper): the Close DO is on to close, off to open; leave Open DO on "none".
           Two outputs (double-acting valve): one is switched on and the other off. "wait s" gives the gripper time to move before the next step.</div>
         <div class="row" style="margin-top:6px"><button id="gTestClose">Close now</button><button id="gTestOpen">Open now</button></div>
+        <div class="row" style="color:var(--mute);margin-top:8px;flex-wrap:wrap">
+          <span>Simulator gripper <select id="gModel"><option value="">none</option><option value="egpc40">SCHUNK Co-act EGP-C 40</option></select></span>
+          <button id="gSimTool">Set sim tool + payload</button>
+        </div>
+        <div style="color:var(--mute);font-size:12px;margin-top:4px">Shown in the 3D view in the simulator and demo only; its jaws follow the outputs above.
+          <i>Set sim tool + payload</i> makes the simulator's tool slot 1 the jaw tips (120.5 mm) and its payload 0.66 kg. Fingers add to that length.</div>
       </details>
       <div id="wps" style="color:var(--mute)">No waypoints yet.</div>
       <div class="row" style="margin-top:6px">

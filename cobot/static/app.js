@@ -171,19 +171,30 @@ $("tLin").onclick = async () => { if (!target) return; await cmd("moveL", {relFl
 $("tJnt").onclick = async () => { if (!target || !ghost) return; await cmd("joint_move", {relFlag: 0, jointPosition: ghost.joints, speed: jspeed(), accel: 100}); $("tCancel").onclick(); };
 
 // ------------------------------------------------------------ gripper (digital outputs), usable as waypoint steps
-const GRIP = {close: 0, open: -1, wait: 0.5};   // open -1 = single output: Close DO off opens it
+const GRIP = {close: 0, open: -1, wait: 0.5, model: "egpc40"};   // open -1 = single output: Close DO off opens it
 try { Object.assign(GRIP, JSON.parse(localStorage.getItem("gripper") || "{}")); } catch (_) {}
 for (const id of ["gClose", "gOpen"])
   $(id).innerHTML = (id === "gOpen" ? `<option value="-1">none</option>` : "") + Array.from({length: 16}, (_, k) => `<option value="${k}">DO ${k}</option>`).join("");
-function showGrip() { $("gClose").value = GRIP.close; $("gOpen").value = GRIP.open; $("gWait").value = GRIP.wait; }
+function showGrip() { $("gClose").value = GRIP.close; $("gOpen").value = GRIP.open; $("gWait").value = GRIP.wait; $("gModel").value = GRIP.model || ""; }
 function saveGrip() {
-  GRIP.close = +$("gClose").value; GRIP.open = +$("gOpen").value; GRIP.wait = Math.max(0, +$("gWait").value || 0);
+  GRIP.close = +$("gClose").value; GRIP.open = +$("gOpen").value; GRIP.wait = Math.max(0, +$("gWait").value || 0); GRIP.model = $("gModel").value;
   if (GRIP.open === GRIP.close) { GRIP.open = -1; toast("Open DO can't be the same as Close DO: set to none"); }
   showGrip(); try { localStorage.setItem("gripper", JSON.stringify(GRIP)); } catch (_) {}
   drawWps();
 }
 showGrip();
-for (const id of ["gClose", "gOpen", "gWait"]) $(id).onchange = saveGrip;
+for (const id of ["gClose", "gOpen", "gWait", "gModel"]) $(id).onchange = saveGrip;
+// simulator only: tool slot 1 at the jaw tips + the gripper's weight, so moves and the TCP ball match the model
+$("gSimTool").onclick = async () => {
+  const G = GRIPPERS[GRIP.model];
+  if (!G) { toast("Pick a simulator gripper first"); return; }
+  if (S.mode === "real") { toast("Simulator only: set the real cobot's tool and payload in Setup"); return; }
+  const rs = [await cmd("set_tool_offsets", {id: 1, tooloffset: [0, 0, G.length, 0, 0, 0], name: "EGP-C 40"}),
+              await cmd("set_tool_id", {tool_id: 1}),
+              await cmd("set_payload", {mass: G.mass, centroid: [0, 0, G.com]})];
+  readCfg().catch(() => {});
+  toast(rs.every(okR) ? `Simulator: tool 1 = ${G.name} jaw tips (Z ${G.length} mm), payload ${G.mass} kg` : "Simulator didn't accept: " + (rs.find(r => !okR(r)).errorMsg || "error"));
+};
 const setDo = (i, v) => cmd("set_digital_output", {type: 0, index: i, value: v ? 1 : 0});
 async function gripStep(close) {
   let r = await setDo(GRIP.close, close);
@@ -771,7 +782,7 @@ function cyl(p0, p1, r, paint, capAt) {
   }
 }
 // pts = [base, J2, J3, J3 after side step, J4, J5, flange, tcp] (see kinematics.joint_points)
-function drawArm(pts, alpha, ghostMode) {
+function drawArm(pts, alpha, ghostMode, withGripper) {
   if (!pts || pts.length !== 8) return;
   const [base, sh, el, st, w1, w2, fl, tcp] = pts;
   const s = Math.min(1.8, Math.max(1, ((profiles[S.model] && profiles[S.model].reach) || 626) / 626));
@@ -792,12 +803,66 @@ function drawArm(pts, alpha, ghostMode) {
     [w1, at(w2, z5, 32), 36, green, 1],                               // J5
     [w2, at(fl, z6, -14), 34, green], [at(fl, z6, -14), fl, 31, silver, 1], // J6 + flange
   ];
-  if (len(sub(tcp, fl)) > 1) parts.push([fl, tcp, 10, grey]);
+  if (len(sub(tcp, fl)) > 1 && !(withGripper && showGripper())) parts.push([fl, tcp, 10, grey]);
   parts.sort((a, b) => { const pa = proj(mul(add(a[0], a[1]), .5)), pb = proj(mul(add(b[0], b[1]), .5)); return (pb ? pb[2] : 0) - (pa ? pa[2] : 0); });
   ctx.globalAlpha = alpha;
   for (const [p0, p1, r, paint, capAt] of parts) cyl(p0, p1, r * s, paint, capAt);
   ctx.globalAlpha = 1;
+  if (withGripper && showGripper()) drawGripper(fl, alpha);
 }
+// ------------------------------------------------------------ gripper model (simulator only)
+// SCHUNK Co-act EGP-C 40-N-N-FCR7 (ID 1326456): 93.8 x 90.2 x 120.5 mm, 6 mm stroke per jaw, 0.2 s open/close.
+// Body and jaw shapes are simplified boxes; the outer dimensions and stroke follow the datasheet.
+const GRIPPERS = {
+  egpc40: {name: "SCHUNK Co-act EGP-C 40", mass: 0.66, com: 45, length: 120.5, body: [93.8, 90.2, 88], jaw: [18, 26, 32.5], stroke: 6, closedGap: 6, time: 0.2},
+};
+let jawOpen = 1, jawT = 0;   // 1 = fully open
+function jawTarget() {
+  const d = S.dout || [], c = !!d[GRIP.close], o = GRIP.open >= 0 ? !!d[GRIP.open] : !c;
+  return c && !o ? 0 : o && !c ? 1 : jawOpen;   // both or neither on (two-output valve): jaws hold
+}
+const matT = M => [0, 1, 2].map(i => [0, 1, 2].map(j => M[j][i]));
+const matMul = (A, Bm) => A.map(r => [0, 1, 2].map(j => r[0] * Bm[0][j] + r[1] * Bm[1][j] + r[2] * Bm[2][j]));
+// convex box: centre c, unit axes ax[3], half sizes h[3]; draws the faces turned to the camera
+function box(c, ax, h, color, sidesOnly) {
+  const faces = [];
+  for (let k = 0; k < (sidesOnly ? 2 : 3); k++) for (const sg of [1, -1]) {
+    const n = mul(ax[k], sg), fc = add(c, mul(n, h[k]));
+    if (dot(n, sub(fc, B.eye)) >= 0) continue;
+    const u = ax[(k + 1) % 3], v = ax[(k + 2) % 3], hu = h[(k + 1) % 3], hv = h[(k + 2) % 3];
+    const P = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, b]) => proj(add(fc, add(mul(u, a * hu), mul(v, b * hv)))));
+    if (P.some(p => !p)) return;
+    faces.push({P, light: .55 + .45 * Math.max(0, dot(n, norm([.3, -.5, .8])))});
+  }
+  for (const f of faces) {
+    const [r, g, b] = color.map(x => Math.round(x * f.light));
+    ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.beginPath(); f.P.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 1; ctx.stroke();
+  }
+}
+function drawGripper(fl, alpha) {
+  const G = GRIPPERS[GRIP.model]; if (!G || !S.tcp) return;
+  // flange orientation = TCP orientation with the active tool's rotation taken out
+  const t = S.tool || [0, 0, 0, 0, 0, 0], Rf = matMul(rpyR(S.tcp[3], S.tcp[4], S.tcp[5]), matT(rpyR(t[3], t[4], t[5])));
+  const ex = [Rf[0][0], Rf[1][0], Rf[2][0]], ey = [Rf[0][1], Rf[1][1], Rf[2][1]], ez = [Rf[0][2], Rf[1][2], Rf[2][2]];
+  const now = performance.now() / 1000, dt = Math.min(.1, now - (jawT || now)); jawT = now;
+  const goal = jawTarget(), step = dt / G.time;
+  jawOpen = goal > jawOpen ? Math.min(goal, jawOpen + step) : Math.max(goal, jawOpen - step);
+  const at = (x, y, z) => add(fl, add(mul(ex, x), add(mul(ey, y), mul(ez, z))));
+  const [bx, by, bz] = G.body, [jx, jy, jz] = G.jaw, off = G.closedGap / 2 + jx / 2 + G.stroke * jawOpen;
+  const body = [
+    {c: at(0, 0, bz / 2), h: [bx / 2, by / 2, bz / 2], col: [70, 74, 80]},                  // housing
+    {c: at(0, 0, bz - 6), h: [bx / 2 + 1.5, by / 2 + 1.5, 4], col: [40, 140, 230], sides: true},   // status light band (wraps the housing)
+  ];
+  const jaws = [off, -off].map(x => ({c: at(x, 0, bz + jz / 2), h: [jx / 2, jy / 2, jz / 2], col: [200, 205, 212]}));
+  jaws.sort((a, b) => dot(sub(b.c, B.eye), B.f) - dot(sub(a.c, B.eye), B.f));
+  // jaws sit past the housing's end face: draw them last when the camera looks at that face
+  const jawSide = dot(sub(B.eye, at(0, 0, bz)), ez) > 0;
+  ctx.globalAlpha = alpha;
+  for (const p of jawSide ? [...body, ...jaws] : [...jaws, ...body]) box(p.c, [ex, ey, ez], p.h, p.col, p.sides);
+  ctx.globalAlpha = 1;
+}
+const showGripper = () => !!GRIPPERS[GRIP.model] && S.mode !== "real";
 function drawFrame(p, R, len, alpha) {
   const cols = ["#ff5c5c", "#3dcd58", "#4c9aff"];
   for (let k = 0; k < 3; k++) { ctx.globalAlpha = alpha; line(p, add(p, [R[0][k] * len, R[1][k] * len, R[2][k] * len]), cols[k], 2); }
@@ -821,7 +886,7 @@ function draw() {
   // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
   if (S.points) lastPts = S.points;
   else if (!lastPts && !lastPtsAsked) { lastPtsAsked = true; api("/api/fk", {joints: [0, 90, -90, 90, 90, 0]}).then(r => { if (r.points && !lastPts) lastPts = r.points; }).catch(() => { lastPtsAsked = false; }); }
-  drawArm(S.points || lastPts, S.points ? 1 : .3, false);
+  drawArm(S.points || lastPts, S.points ? 1 : .3, false, !!S.points);
   if (!S.points) {
     const msg = S.bridge_down ? "Bridge not reachable: is the app still running on the PC?"
       : S.mode === "real" ? `No data from the cobot${S.host ? " at " + S.host : ""}: check the PC is on the cobot Wi-Fi`
