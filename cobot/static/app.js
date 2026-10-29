@@ -759,7 +759,7 @@ function drawFrame(p, R, len, alpha) {
   for (let k = 0; k < 3; k++) { ctx.globalAlpha = alpha; line(p, add(p, [R[0][k] * len, R[1][k] * len, R[2][k] * len]), cols[k], 2); }
   ctx.globalAlpha = 1;
 }
-let tcpScreen = null, targetScreen = null;
+let tcpScreen = null, targetScreen = null, lastPts = null, lastPtsAsked = false;
 function draw() {
   const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
   if (cv.width !== Math.round(rect.width * dpr) || cv.height !== Math.round(rect.height * dpr)) { cv.width = Math.round(rect.width * dpr); cv.height = Math.round(rect.height * dpr); }
@@ -774,7 +774,20 @@ function draw() {
   const bp = []; for (let a = 0; a <= 32; a++) { const P = proj([95 * Math.cos(a / 32 * 6.283), 95 * Math.sin(a / 32 * 6.283), 0]); if (P) bp.push(P); }
   ctx.fillStyle = "#2e3034"; ctx.beginPath(); bp.forEach((P, i) => i ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1])); ctx.fill();
   if (ghost) drawArm(ghost.points, .35, true);
-  drawArm(S.points, 1, false);
+  // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
+  if (S.points) lastPts = S.points;
+  else if (!lastPts && !lastPtsAsked) { lastPtsAsked = true; api("/api/fk", {joints: [0, 90, -90, 90, 90, 0]}).then(r => { if (r.points && !lastPts) lastPts = r.points; }).catch(() => { lastPtsAsked = false; }); }
+  drawArm(S.points || lastPts, S.points ? 1 : .3, false);
+  if (!S.points) {
+    const msg = S.bridge_down ? "Bridge not reachable: is the app still running on the PC?"
+      : S.mode === "real" ? `No data from the cobot${S.host ? " at " + S.host : ""}: check the PC is on the cobot Wi-Fi`
+      : S.connected ? "Waiting for data…" : "Not connected: Setup → Connect";
+    ctx.font = "600 14px system-ui, sans-serif"; ctx.textAlign = "center";
+    const tw = ctx.measureText(msg).width + 28;
+    ctx.fillStyle = "rgba(29,30,32,.85)"; ctx.fillRect(W / 2 - tw / 2, 18, tw, 32);
+    ctx.strokeStyle = "#e8642a"; ctx.lineWidth = 1; ctx.strokeRect(W / 2 - tw / 2, 18, tw, 32);
+    ctx.fillStyle = "#fff"; ctx.fillText(msg, W / 2, 39); ctx.textAlign = "start";
+  }
   tcpScreen = null; targetScreen = null;
   if (S.tcp) {
     const p = S.tcp.slice(0, 3);

@@ -19,6 +19,7 @@ import hmac
 import json
 import os
 import secrets
+import socket
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -29,6 +30,27 @@ STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".webmanifest": "application/manifest+json", ".png": "image/png", ".json": "application/json"}
 OPEN_PATHS = {"/api/auth", "/api/login"}  # reachable without the PIN
+
+
+_local_sims = []
+
+
+def _ensure_local_sim(host, modbus_port, cmd_port, status_port, model):
+    """Simulator picked in the page but none running (app started as 'ui', or the .exe in real-cobot use):
+    start one here so Setup → Simulator → Connect always works."""
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        return
+    try:
+        socket.create_connection(("127.0.0.1", cmd_port), timeout=0.5).close()
+        return  # something already listens there
+    except OSError:
+        pass
+    from .sim_server import VirtualController
+    try:
+        _local_sims.append(VirtualController("127.0.0.1", modbus_port, cmd_port, status_port, model).start())
+        time.sleep(0.3)
+    except OSError:
+        pass  # a port is taken: connect() reports the error
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -120,6 +142,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "PIN required"}, 401)
         try:
             if p == "/api/connect":
+                if body.get("mode", "sim") == "sim":
+                    _ensure_local_sim(body.get("host", "127.0.0.1"), int(body.get("modbus_port", 502)),
+                                      int(body.get("cmd_port", 10001)), int(body.get("status_port", 10000)),
+                                      body.get("model") or "LXMRL03")
                 r = d.connect(body.get("host", "127.0.0.1"), body.get("mode", "sim"),
                               int(body.get("modbus_port", 502)), int(body.get("cmd_port", 10001)),
                               int(body.get("status_port", 10000)), body.get("model"))

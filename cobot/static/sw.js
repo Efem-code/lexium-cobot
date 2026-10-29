@@ -1,6 +1,6 @@
 // Service worker: keeps the app shell available offline (demo works with no
 // internet, e.g. while the iPad is on the cobot's Wi-Fi). /api is never cached.
-const CACHE = "cobot-v6";
+const CACHE = "cobot-v7";
 const SHELL = ["./", "index.html", "app.js", "sim.js", "manifest.webmanifest",
                "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "guillevin-logo.png"];
 
