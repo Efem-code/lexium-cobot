@@ -170,22 +170,55 @@ $("tCancel").onclick = () => { target = null; ghost = null; $("targetBar").class
 $("tLin").onclick = async () => { if (!target) return; await cmd("moveL", {relFlag: 0, cartPosition: target.pose, speed: +$("cspd").value * 2, accel: 500}); $("tCancel").onclick(); };
 $("tJnt").onclick = async () => { if (!target || !ghost) return; await cmd("joint_move", {relFlag: 0, jointPosition: ghost.joints, speed: jspeed(), accel: 100}); $("tCancel").onclick(); };
 
+// ------------------------------------------------------------ gripper (digital outputs), usable as waypoint steps
+const GRIP = {close: 0, open: -1, wait: 0.5};   // open -1 = single output: Close DO off opens it
+try { Object.assign(GRIP, JSON.parse(localStorage.getItem("gripper") || "{}")); } catch (_) {}
+for (const id of ["gClose", "gOpen"])
+  $(id).innerHTML = (id === "gOpen" ? `<option value="-1">none</option>` : "") + Array.from({length: 16}, (_, k) => `<option value="${k}">DO ${k}</option>`).join("");
+function showGrip() { $("gClose").value = GRIP.close; $("gOpen").value = GRIP.open; $("gWait").value = GRIP.wait; }
+function saveGrip() {
+  GRIP.close = +$("gClose").value; GRIP.open = +$("gOpen").value; GRIP.wait = Math.max(0, +$("gWait").value || 0);
+  if (GRIP.open === GRIP.close) { GRIP.open = -1; toast("Open DO can't be the same as Close DO: set to none"); }
+  showGrip(); try { localStorage.setItem("gripper", JSON.stringify(GRIP)); } catch (_) {}
+  drawWps();
+}
+showGrip();
+for (const id of ["gClose", "gOpen", "gWait"]) $(id).onchange = saveGrip;
+const setDo = (i, v) => cmd("set_digital_output", {type: 0, index: i, value: v ? 1 : 0});
+async function gripStep(close) {
+  let r = await setDo(GRIP.close, close);
+  if (r.errorCode === "0" && GRIP.open >= 0) r = await setDo(GRIP.open, !close);
+  if (r.errorCode !== "0") { toast("Gripper: " + (r.errorMsg || "output not set")); return r; }
+  if (GRIP.wait) await sleep(GRIP.wait * 1000);
+  return r;
+}
+const gripLabel = close => `${close ? "Close" : "Open"} gripper · DO ${GRIP.close} ${close ? "on" : "off"}` + (GRIP.open >= 0 ? `, DO ${GRIP.open} ${close ? "off" : "on"}` : "");
+$("bGripClose").onclick = () => { waypoints.push({grip: "close"}); drawWps(); };
+$("bGripOpen").onclick = () => { waypoints.push({grip: "open"}); drawWps(); };
+$("gTestClose").onclick = () => gripStep(true);
+$("gTestOpen").onclick = () => gripStep(false);
+
 function drawWps() {
   try { localStorage.setItem("waypoints", JSON.stringify(waypoints)); } catch (_) {}
   const W = $("wps"); if (!waypoints.length) { W.textContent = "No waypoints yet."; return; }
+  let n = 0;
   W.innerHTML = ""; waypoints.forEach((w, i) => {
-    const d = document.createElement("div"); d.className = "wp";
+    const d = document.createElement("div"); d.className = "wp" + (w.grip ? " grip" : "");
     const mv = w.move === "L" ? "L" : "J";
-    d.innerHTML = `<span class="mono">P${i + 1} ${w.tcp.slice(0, 3).map(v => v.toFixed(0)).join(", ")}</span><span class="row"><button class="mv ${mv}" title="J = joint move, L = straight line">${mv}</button><button>Go</button><button>✕</button></span>`;
-    const [m, g, x] = d.querySelectorAll("button");
-    m.onclick = () => { w.move = mv === "L" ? "J" : "L"; drawWps(); };
-    g.onclick = () => wpMove(w);
-    x.onclick = () => { waypoints.splice(i, 1); drawWps(); };
+    const up = i ? `<button title="Move up">▲</button>` : "";
+    d.innerHTML = w.grip
+      ? `<span class="mono" title="${gripLabel(w.grip === "close")}">${w.grip === "close" ? "✊ Close" : "✋ Open"} gripper</span><span class="row">${up}<button>Go</button><button>✕</button></span>`
+      : `<span class="mono">P${++n} ${w.tcp.slice(0, 3).map(v => v.toFixed(0)).join(", ")}</span><span class="row">${up}<button class="mv ${mv}" title="J = joint move, L = straight line">${mv}</button><button>Go</button><button>✕</button></span>`;
+    const b = [...d.querySelectorAll("button")];
+    if (i) b.shift().onclick = () => { [waypoints[i - 1], waypoints[i]] = [waypoints[i], waypoints[i - 1]]; drawWps(); };
+    if (!w.grip) b.shift().onclick = () => { w.move = mv === "L" ? "J" : "L"; drawWps(); };
+    b[0].onclick = () => wpMove(w);
+    b[1].onclick = () => { waypoints.splice(i, 1); drawWps(); };
     W.appendChild(d);
   });
 }
 const lspeed = () => +$("cspd").value * 2;
-const wpMove = w => w.move === "L"
+const wpMove = w => w.grip ? gripStep(w.grip === "close") : w.move === "L"
   ? cmd("moveL", {relFlag: 0, cartPosition: w.tcp, speed: lspeed(), accel: 500})
   : cmd("joint_move", {relFlag: 0, jointPosition: w.joints, speed: jspeed(), accel: 100});
 let playing = false;
@@ -205,6 +238,7 @@ async function playWps() {
       if (!playing) break;
       const r = await wpMove(w);
       if (r.errorCode !== "0") { playing = false; break; }
+      if (w.grip) continue;   // its own wait already ran; the pause is between moves
       await sleep(250);
       while (playing && S.inpos === false) await sleep(50);
       // stop the loop on any fault (e-stop, protective stop, disabled)
@@ -409,19 +443,21 @@ const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
 $("wpExport").onclick = () => {
   if (!waypoints.length) { toast("No waypoints to export"); return; }
   download(`waypoints-${stamp()}.json`, JSON.stringify({format: "lexium-cobot-waypoints", version: 1, model: S.model,
-    loop: $("loop").checked, pause_s: +$("dwell").value || 0, points: waypoints}, null, 2), "application/json");
+    loop: $("loop").checked, pause_s: +$("dwell").value || 0, gripper: {...GRIP}, points: waypoints}, null, 2), "application/json");
 };
 $("wpImport").onclick = () => $("wpFile").click();
 $("wpFile").onchange = async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   try {
     const j = JSON.parse(await f.text()), pts = Array.isArray(j) ? j : j.points;
-    if (!Array.isArray(pts) || !pts.every(p => Array.isArray(p.joints) && p.joints.length === 6 && Array.isArray(p.tcp)))
+    const isGrip = p => p.grip === "open" || p.grip === "close";
+    if (!Array.isArray(pts) || !pts.every(p => isGrip(p) || (Array.isArray(p.joints) && p.joints.length === 6 && Array.isArray(p.tcp))))
       throw new Error("not a waypoint file");
     if (waypoints.length && !confirm(`Replace the ${waypoints.length} current waypoints with ${pts.length} from ${f.name}?`)) return;
-    waypoints = pts.map(p => ({joints: p.joints.map(Number), tcp: p.tcp.map(Number), move: p.move === "L" ? "L" : "J"}));
+    waypoints = pts.map(p => isGrip(p) ? {grip: p.grip} : ({joints: p.joints.map(Number), tcp: p.tcp.map(Number), move: p.move === "L" ? "L" : "J"}));
     if (j.loop != null) $("loop").checked = !!j.loop;
     if (j.pause_s != null) $("dwell").value = j.pause_s;
+    if (j.gripper) { Object.assign(GRIP, j.gripper); showGrip(); saveGrip(); }
     drawWps(); toast(`Loaded ${waypoints.length} waypoints`);
   } catch (err) { toast("Import failed: " + err.message); }
 };
@@ -433,10 +469,18 @@ function wpScript() {
   if (!waypoints.length) return "// teach some waypoints first\n";
   const lines = ["// generated from waypoints: edit freely", "await robot.speed(" + (S.speed_override ?? Math.round(S.speed_ratio || 100)) + ");", "",
     "const loops = " + ($("loop").checked ? "5" : "1") + ";", "for (let n = 1; n <= loops; n++) {"];
-  waypoints.forEach((w, i) => {
+  let n = 0;
+  waypoints.forEach(w => {
+    if (w.grip) {
+      const close = w.grip === "close", outs = [`await robot.set_do(${GRIP.close}, ${close});`];
+      if (GRIP.open >= 0) outs.push(`await robot.set_do(${GRIP.open}, ${!close});`);
+      if (GRIP.wait) outs.push(`await sleep(${GRIP.wait});`);
+      lines.push(`  ${outs.join(" ")}   // ${close ? "close" : "open"} gripper`);
+      return;
+    }
     lines.push(w.move === "L"
-      ? `  await robot.move_linear([${w.tcp.map(r1).join(", ")}], {speed: ${lspeed()}});   // P${i + 1}`
-      : `  await robot.move_joint([${w.joints.map(r1).join(", ")}], {speed: ${jspeed()}});   // P${i + 1}`);
+      ? `  await robot.move_linear([${w.tcp.map(r1).join(", ")}], {speed: ${lspeed()}});   // P${++n}`
+      : `  await robot.move_joint([${w.joints.map(r1).join(", ")}], {speed: ${jspeed()}});   // P${++n}`);
     const d = +$("dwell").value || 0;
     if (d) lines.push(`  await sleep(${d});`);
   });
@@ -609,7 +653,7 @@ $("scRun").onclick = async () => {
   try {
     const fn = new Async("robot", "sleep", "log", "P", $("scCode").value);
     await fn(makeRobot(run), async s => { const end = Date.now() + s * 1000; while (Date.now() < end) { if (run.aborted) throw new Error("stopped"); await sleep(Math.min(50, end - Date.now())); } },
-      (...a) => scLog("", ...a), waypoints.map(w => ({...w})));
+      (...a) => scLog("", ...a), waypoints.filter(w => !w.grip).map(w => ({...w})));
     scLog("", `✓ finished in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   } catch (e) {
     scLog("e", (run.aborted ? "■ " : "✗ ") + e.message);

@@ -91,6 +91,7 @@ td:first-child,th:first-child{text-align:left}
 #scOut .e{color:#ffb4b6}
 .wp .mv{min-width:30px;padding:3px 6px;font-weight:700}
 .wp .mv.L{color:var(--accent);border-color:var(--accent)}
+.wp.grip .mono{color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{border:0;border-radius:0;background:transparent;padding:5px 10px}
 .seg button.sel{background:var(--accent2)}
@@ -289,6 +290,19 @@ td:first-child,th:first-child{text-align:left}
         <span>pause s <input id="dwell" value="0" inputmode="decimal" style="width:44px"></span>
         <span id="cycles"></span>
       </div>
+      <div class="row" style="margin-bottom:6px">
+        <button id="bGripClose">+ Close gripper</button><button id="bGripOpen">+ Open gripper</button>
+      </div>
+      <details class="calib" style="margin-bottom:6px"><summary>Gripper outputs</summary>
+        <div class="row" style="color:var(--mute);margin-top:6px;flex-wrap:wrap">
+          <span>Close DO <select id="gClose"></select></span>
+          <span>Open DO <select id="gOpen"></select></span>
+          <span>wait s <input id="gWait" value="0.5" inputmode="decimal" style="width:44px"></span>
+        </div>
+        <div style="color:var(--mute);font-size:12px;margin-top:4px">One output (spring-return gripper): the Close DO is on to close, off to open; leave Open DO on "none".
+          Two outputs (double-acting valve): one is switched on and the other off. "wait s" gives the gripper time to move before the next step.</div>
+        <div class="row" style="margin-top:6px"><button id="gTestClose">Close now</button><button id="gTestOpen">Open now</button></div>
+      </details>
       <div id="wps" style="color:var(--mute)">No waypoints yet.</div>
       <div class="row" style="margin-top:6px">
         <button id="wpExport">Export</button><button id="wpImport">Import</button><button id="wpToScript">→ Script</button><button id="wpClear">Clear</button>
