@@ -148,7 +148,12 @@ $("bPowerOff").onclick = () => cmd("power_off");
 $("bEnable").onclick = () => cmd("enable_robot");
 $("bDisable").onclick = () => cmd("disable_robot");
 $("bClear").onclick = () => cmd("clear_error");
-$("bHome").onclick = () => cmd("joint_move", {relFlag: 0, jointPosition: HOME, speed: jspeed(), accel: 100});
+$("bHome").onclick = () => {
+  if (S.mode === "real" && !confirm(`Move the REAL arm to the home pose?
+
+All joints move at once, at ${S.speed_override ?? "?"}% speed. Make sure the path is clear.`)) return;
+  cmd("joint_move", {relFlag: 0, jointPosition: HOME, speed: jspeed(), accel: 100});
+};
 $("bEstop").onclick = () => cmd("sim_estop", {on: !S.estop});
 $("bColl").onclick = () => cmd("sim_protective_stop");
 $("bResetSim").onclick = () => cmd("clear_error");
@@ -224,6 +229,10 @@ function render() {
     if (S.host) $("host").value = S.host;
   }
   if (document.activeElement !== $("arm")) $("arm").checked = !!S.motion_armed;
+  // real cobot: the bridge enforces the speed limit, so show its value
+  if (S.mode === "real" && S.speed_override != null)
+    for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]])
+      if (document.activeElement !== $(sl)) { $(sl).value = S.speed_override; $(lab).textContent = S.speed_override + "%"; }
   const L =[["Power", S.powered, "on"], ["Enabled", S.enabled, "on"], ["E-stop", S.estop, "red"], ["Prot. stop", S.protective_stop, "red"],
              ["Soft limit", S.on_soft_limit, "amber"], ["In position", S.inpos, "on"], ["Jogging", S.jogging, "amber"]];
   // the real controller doesn't report a control source; only the simulator models it

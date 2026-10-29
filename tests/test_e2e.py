@@ -140,6 +140,14 @@ try:
     check("real mode is read-only until armed", False)
 except PermissionError:
     check("real mode is read-only until armed", True)
+# real mode: the bridge scales speeds itself (controller ignores set_rapidrate)
+check("real mode starts at 10% speed", abs(d2.speed - 0.10) < 1e-9 and d2.status()["speed_override"] == 10)
+d2.motion_armed = True
+r = d2.command("set_rapidrate", rapid_rate=0.25)
+check("set_rapidrate handled by the bridge", ok(r) and abs(d2.speed - 0.25) < 1e-9)
+sc = d2._scaled("joint_move", {"speed": 40, "accel": 100, "jointPosition": [0] * 6})
+check("move speed + accel scaled", sc["speed"] == 10 and sc["accel"] == 25 and sc["jointPosition"] == [0] * 6)
+check("jog velocity scaled", d2._scaled("jog", {"jogvel": -20})["jogvel"] == -5)
 d2.disconnect()
 
 print()

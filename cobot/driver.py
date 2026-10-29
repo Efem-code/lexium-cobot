@@ -16,7 +16,7 @@ import time
 
 from . import kinematics as K
 from . import regmap as RM
-from .jaka_proto import JakaClient, JsonStream, detect_tls, open_socket
+from .jaka_proto import JakaClient, JsonStream, open_socket
 from .modbus import ModbusClient
 
 JOG_TIMEOUT = 0.35
@@ -31,6 +31,12 @@ def _jog_stop_fields(active):
 
 MOTION_CMDS = {"joint_move", "end_move", "moveL", "jog", "power_on", "enable_robot",
                "set_digital_output", "set_tool_offsets"}
+
+# The real controller doesn't answer set_rapidrate (its own override stays at 100%),
+# so on the real cobot the bridge scales every speed itself.
+REAL_DEFAULT_SPEED = 0.10
+SCALED_FIELDS = {"joint_move": ("speed", "accel"), "end_move": ("speed", "accel"),
+                 "moveL": ("speed", "accel"), "jog": ("jogvel",)}
 
 
 class CobotDriver:
@@ -53,6 +59,7 @@ class CobotDriver:
         self.last_error = ""
         self.jog_active = None
         self.jog_last = 0.0
+        self.speed = 1.0           # bridge-side speed override (real mode), 0.01..1
         self._gen = 0              # connection generation; old threads exit
         self.history = []          # (t, joints) for plots
 
@@ -62,7 +69,9 @@ class CobotDriver:
         """tls=None auto-detects: the real controller wraps the JSON ports in TLS."""
         self.disconnect()
         if tls is None:
-            tls = mode == "real" and detect_tls(host, cmd_port)
+            # Lexium firmware 1.7 is TLS-only. Probing (detect_tls) can time out on a busy
+            # controller and silently fall back to plain TCP, which the cobot ignores.
+            tls = mode == "real"
         with self.lock:
             self._gen += 1
             gen = self._gen
@@ -71,6 +80,7 @@ class CobotDriver:
             self.mb = ModbusClient(host, modbus_port, timeout=1.5)
             self.cmd = JakaClient(host, cmd_port, timeout=2.0, tls=tls)
             self.motion_armed = (mode == "sim")
+            self.speed = REAL_DEFAULT_SPEED if mode == "real" else 1.0
             self.connected = True
             self.last_error = ""
             if model:
@@ -185,6 +195,12 @@ class CobotDriver:
             raise PermissionError("Real cobot is READ-ONLY until motion is armed")
         if self.mode == "real" and name.startswith("sim_"):
             raise PermissionError("simulator-only command")
+        if self.mode == "real":
+            if name == "set_rapidrate":
+                with self.lock:
+                    self.speed = min(1.0, max(0.01, float(fields.get("rapid_rate", REAL_DEFAULT_SPEED))))
+                return {"errorCode": "0", "errorMsg": "", "cmdName": name, "speed": self.speed}
+            fields = self._scaled(name, fields)
         try:
             r = self.cmd.send(name, **fields)
             self.cmd_ok = True
@@ -195,6 +211,16 @@ class CobotDriver:
         if r.get("errorCode") not in ("0", 0):
             self.last_error = f"{name}: {r.get('errorMsg')}"
         return r
+
+    def _scaled(self, name, fields):
+        keys = SCALED_FIELDS.get(name)
+        if not keys:
+            return fields
+        out = dict(fields)
+        for k in keys:
+            if k in out:
+                out[k] = float(out[k]) * self.speed
+        return out
 
     def jog_start(self, coord, axis, direction, speed):
         """coord: joint|base|tool ; axis 0..5 ; direction +1/-1 ; speed deg/s or mm/s
@@ -243,7 +269,7 @@ class CobotDriver:
                        stream_ok=self.stream_ok, motion_armed=self.motion_armed,
                        last_error=self.last_error, jogging=bool(self.jog_active),
                        model=self.arm.model, model_name=self.arm.profile["name"],
-                       tls=self.tls)
+                       tls=self.tls, speed_override=round(self.speed * 100))
         if not st and ex.get("joint_position"):
             out.update(_state_from_stream(ex))
             try:

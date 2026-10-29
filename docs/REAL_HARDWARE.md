@@ -17,8 +17,9 @@ Tested over the controller's Wi-Fi, read-only. Stages 0–1 are done, and part o
 | Load | Each status-stream client receives about 230 KB/s. With several clients connected, the controller stopped accepting connections and Cobot Expert couldn't enable. Keep one app connection at most, and disconnect while using Cobot Expert. |
 
 | Jog (29 Oct 2026) | Verified from the page: joint jog (J1 moved only the base) and Cartesian jog (Z+ straight up), **with Cobot Expert left on Local**. No Remote hand-over or login is needed for the JSON command port. JAKA format: `jog_mode` 1 = continuous, 2 = fixed step (needs `poscmd`), 0 = stop; `jnum` is 0-based; a stop must carry the same `coord_map` + `jnum`. |
+| Speed override (29 Oct 2026) | The controller does **not** answer `set_rapidrate`; its own override stays at 100% (`speed_rate` 1.0 in the stream). A "Go home" at a 40 deg/s setting ran at full speed. The bridge now scales every move/jog speed and acceleration itself in real mode, and starts at **10%** on every connect. |
 
-The driver detects TLS automatically. Not yet tested on the real arm: power on/enable from the page, `joint_move` / `moveL`, waypoint playback.
+The driver always uses TLS in real mode (probing could time out on a busy controller and fall back to plain TCP). Not yet tested on the real arm: power on/enable from the page, `joint_move` / `moveL`, waypoint playback.
 
 ## Stage 0: network
 1. Find the controller IP in Cobot Expert: **Cobot connection icon → Robot IP**.
