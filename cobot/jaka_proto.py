@@ -313,6 +313,11 @@ class JakaServer:
         for s in (self.cmd, self.status):
             threading.Thread(target=s.serve_forever, daemon=True).start()
 
+    def stop(self):
+        for s in (self.cmd, self.status):
+            s.shutdown()
+            s.server_close()
+
 
 # =================================================================== client
 class JakaClient:

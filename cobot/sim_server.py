@@ -43,11 +43,13 @@ class VirtualController:
                     self.robot.ain[idx] = v
 
     def _publish(self):
-        while True:
+        while not getattr(self, "_stopped", False):
             words = RM.build_block(self.robot.modbus_values())
             self.store.write("inputs", RM.ROBOT_DATA_START, words)
             s = self.robot.snapshot()
             self.store.write("discrete", RM.DISCRETE_DO_BASE, s["dout"])
+            # reflect the robot's actual DI (set by a master write *or* inside the sim)
+            self.store.write("coils", RM.COIL_DI_BASE, s["din"][:RM.IO_COUNT])
             time.sleep(0.01)
 
     def start(self):
@@ -56,3 +58,10 @@ class VirtualController:
         self.jaka.start()
         threading.Thread(target=self._publish, daemon=True, name="modbus-publish").start()
         return self
+
+    def stop(self):
+        self._stopped = True
+        self.jaka.stop()
+        self.modbus.shutdown()
+        self.modbus.server_close()
+        self.robot.shutdown()
