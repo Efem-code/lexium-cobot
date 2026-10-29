@@ -210,6 +210,111 @@ async function playWps() {
   playing = false; $("bPlay").textContent = "Play";
 }
 
+// ------------------------------------------------------------ cobot setup (payload, tool, user frame)
+// Every write is read back from the cobot, so the page reports whether it really took.
+const CFG = {tools: [], users: [], toolId: null, userId: null, key: null};
+const near = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, k) => Math.abs(v - b[k]) < 1e-3);
+const okR = r => r && (r.errorCode === "0" || r.errorCode === 0);
+function numOf(id) { const v = parseFloat($(id).value); if (!isFinite(v)) throw new Error("Enter a number in every field"); return v; }
+for (const [box, p] of [["toolOff", "to"], ["userOff", "uo"]])
+  $(box).innerHTML = CN.map((n, i) => `<label class="f">${n} ${i < 3 ? "mm" : "°"}<input id="${p}${i}" inputmode="decimal"></label>`).join("");
+function slotOptions(sel, list, active, zero) {
+  const cur = sel.value;
+  sel.innerHTML = list.map((o, i) => `<option value="${i}">${i}${i === 0 ? " · " + zero : ""}${i === active ? " (active)" : ""}` +
+    `${i && o.some(v => v) ? " · " + o.slice(0, 3).map(v => (+v).toFixed(1)).join(", ") : ""}</option>`).join("");
+  sel.value = cur !== "" && +cur < list.length ? cur : String(active ?? 0);
+}
+function showSlot(p, list, i) { (list[i] || [0, 0, 0, 0, 0, 0]).forEach((v, k) => $(p + k).value = +(+v).toFixed(3)); }
+function cfgMsg(t, good) { $("cfgMsg").innerHTML = t; $("cfgMsg").className = "note" + (good ? " ok-msg" : ""); }
+async function readCfg() {
+  const [pl, to, uo, cs, gd] = await Promise.all(["get_payload", "get_tool_offsets", "get_user_offsets", "get_clsn_sensitivity", "get_data"].map(n => cmd(n)));
+  if (okR(pl)) { $("plM").value = pl.mass; ["plX", "plY", "plZ"].forEach((id, k) => $(id).value = pl.centroid[k]); }
+  if (okR(to)) CFG.tools = to.tool_offsets;
+  if (okR(uo)) CFG.users = uo.user_offsets;
+  if (okR(gd)) { CFG.toolId = gd.current_tool_id ?? null; CFG.userId = gd.current_user_id ?? null; }
+  $("toolAct").textContent = CFG.toolId ?? "—"; $("userAct").textContent = CFG.userId ?? "—";
+  $("clsn").textContent = okR(cs) ? "level " + cs.sensitivityLevel : "—";
+  slotOptions($("toolSlot"), CFG.tools, CFG.toolId, "flange"); showSlot("to", CFG.tools, +$("toolSlot").value);
+  slotOptions($("userSlot"), CFG.users, CFG.userId, "base"); showSlot("uo", CFG.users, +$("userSlot").value);
+  return {pl, to, uo, gd};
+}
+async function writeCfg(label, name, fields, confirmed) {
+  if (S.mode === "real" && !confirm(`Change ${label} on the REAL cobot?`)) return;
+  const r = await cmd(name, fields);
+  if (!okR(r)) { cfgMsg(`<b>${label}</b>: not changed. ${r.errorMsg || ""}`); return; }
+  const after = await readCfg();
+  if (confirmed(after)) cfgMsg(`<b>${label}</b>: applied and confirmed by the cobot.`, true);
+  else cfgMsg(`<b>${label}</b>: the cobot accepted the command but the value didn't change. Use Cobot Expert for this one.`);
+}
+const offsets = p => CN.map((_, k) => numOf(p + k));
+const guard = fn => async () => { try { await fn(); } catch (e) { cfgMsg(e.message); } };
+$("cfgRead").onclick = guard(async () => { await readCfg(); cfgMsg("Read from the cobot.", true); });
+$("toolSlot").onchange = () => showSlot("to", CFG.tools, +$("toolSlot").value);
+$("userSlot").onchange = () => showSlot("uo", CFG.users, +$("userSlot").value);
+$("plSet").onclick = guard(() => {
+  const mass = numOf("plM"), centroid = ["plX", "plY", "plZ"].map(numOf);
+  return writeCfg(`payload ${mass} kg`, "set_payload", {mass, centroid},
+    a => okR(a.pl) && Math.abs(a.pl.mass - mass) < 1e-3 && near(a.pl.centroid, centroid));
+});
+$("toolSet").onclick = guard(() => {
+  const id = +$("toolSlot").value, off = offsets("to");
+  if (id === 0) throw new Error("Slot 0 is the bare flange; pick slot 1-10");
+  return writeCfg(`tool slot ${id}`, "set_tool_offsets", {id, tooloffset: off, name: "tool" + id}, a => okR(a.to) && near(a.to.tool_offsets[id], off));
+});
+$("toolUse").onclick = guard(() => {
+  const id = +$("toolSlot").value;
+  return writeCfg(`active tool → ${id}`, "set_tool_id", {tool_id: id}, a => okR(a.gd) && a.gd.current_tool_id === id);
+});
+$("userSet").onclick = guard(() => {
+  const id = +$("userSlot").value, off = offsets("uo");
+  if (id === 0) throw new Error("Slot 0 is the robot base; pick slot 1-10");
+  // "userffset" is JAKA's own spelling of the field
+  return writeCfg(`user frame ${id}`, "set_user_offsets", {id, userffset: off, name: "user" + id}, a => okR(a.uo) && near(a.uo.user_offsets[id], off));
+});
+$("userUse").onclick = guard(() => {
+  const id = +$("userSlot").value;
+  return writeCfg(`active user frame → ${id}`, "set_user_id", {user_frame_id: id}, a => okR(a.gd) && a.gd.current_user_id === id);
+});
+
+// ------------------------------------------------------------ programs stored on the cobot
+let progNames = [], P = {state: null}, progPolled = 0;
+try { progNames = JSON.parse(localStorage.getItem("progNames") || "[]"); } catch (_) {}
+function drawProgNames() { $("progNames").innerHTML = progNames.map(n => `<option value="${n.replace(/[&"<]/g, c => ({"&": "&amp;", '"': "&quot;", "<": "&lt;"})[c])}">`).join(""); }
+drawProgNames();
+const quiet = name => T.call(DEMO ? "/api/cmd" : "api/cmd", {cmdName: name}).catch(() => ({}));  // polling: no toasts
+async function pollProg(force) {
+  if (!S.connected || S.bridge_down || document.hidden) return;
+  // poll every 1.5 s while a program runs, otherwise every 5 s
+  if (!force && P.state === "idle" && Date.now() - progPolled < 5000) return;
+  progPolled = Date.now();
+  const [ld, st, ln] = await Promise.all(["get_loaded_program", "get_program_state", "get_current_line"].map(quiet));
+  P = {loaded: okR(ld) ? ld.programName : null, state: okR(st) ? st.programState : null, line: okR(ln) ? ln.current_line : null};
+  $("progLoaded").textContent = P.loaded || "none"; $("progState").textContent = P.state || "—"; $("progLine").textContent = P.line ?? "—";
+  $("progRun").disabled = !(P.loaded && P.state === "idle");
+  $("progPause").disabled = P.state !== "running";
+  $("progResume").disabled = P.state !== "paused";
+}
+setInterval(pollProg, 1500);
+$("progLoad").onclick = async () => {
+  const n = $("progName").value.trim(); if (!n) { toast("Type a program name"); return; }
+  if (okR(await cmd("load_program", {programName: n}))) {
+    progNames = [n, ...progNames.filter(x => x !== n)].slice(0, 12);
+    try { localStorage.setItem("progNames", JSON.stringify(progNames)); } catch (_) {}
+    drawProgNames();
+  }
+  pollProg(true);
+};
+$("progRun").onclick = async () => {
+  if (S.mode === "real" && !confirm(`Run "${P.loaded}" on the REAL cobot?\n\nIt runs at the speeds saved in the program: this page's speed limit doesn't apply. Keep the E-stop in reach.`)) return;
+  await cmd("play_program"); pollProg(true);
+};
+$("progPause").onclick = async () => { await cmd("pause_program"); pollProg(true); };
+$("progResume").onclick = async () => {
+  if (S.mode === "real" && !confirm(`Resume "${P.loaded}" on the REAL cobot?`)) return;
+  await cmd("resume_program"); pollProg(true);
+};
+$("progStop").onclick = async () => { await cmd("stop_program"); pollProg(true); };
+
 // ------------------------------------------------------------ status rendering
 let shownMode = null;
 function pill(id, cls, txt) { const p = $(id); p.className = "pill " + cls; if (txt) p.textContent = txt; }
@@ -229,6 +334,10 @@ function render() {
     if (S.host) $("host").value = S.host;
   }
   if (document.activeElement !== $("arm")) $("arm").checked = !!S.motion_armed;
+  // read the cobot's setup + program state once per connection
+  const cfgKey = S.connected && !S.bridge_down && (S.joints || S.mode === "demo") ? `${S.mode}|${S.host}` : null;
+  if (cfgKey && cfgKey !== CFG.key) { CFG.key = cfgKey; readCfg().catch(() => {}); pollProg(true); }
+  if (!cfgKey) CFG.key = null;
   // real cobot: the bridge enforces the speed limit, so show its value
   if (S.mode === "real" && S.speed_override != null)
     for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]])

@@ -75,7 +75,9 @@ If the iPad can't open the address, Windows Firewall is the usual cause. Allow P
 5. **Waypoints:** click **Teach** to store the current pose, and **Play** to run the list in order.
 6. **Speed slider:** sets the speed override (`set_rapidrate`).
 7. **STOP** or **Esc:** stops all motion.
-8. **Simulator only:** E-stop, Fake collision (protective stop) and the Remote/Local control-source switch. Use these to test your error handling.
+8. **Cobot setup** (Setup tab): payload, tool (TCP) slots and the active tool, user frames; collision sensitivity is shown view-only. Changes need *Arm motion* ticked and are read back from the cobot to confirm.
+9. **Programs on the cobot** (Points tab): load a program saved on the controller by name, then Run / Pause / Resume / Stop, with its state and current line. Programs run at their own saved speeds.
+10. **Simulator only:** E-stop, Fake collision (protective stop) and the Remote/Local control-source switch. Use these to test your error handling.
 
 ## Files
 

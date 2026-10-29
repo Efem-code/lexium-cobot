@@ -76,6 +76,15 @@ class SimRobot:
         self._t0 = time.time()
         self.cab_temp = 32.0
         self.joint_temp = [30.0] * 6
+        # controller configuration (what Cobot Expert's setup pages edit)
+        self.payload = dict(mass=1.0, centroid=[0.0, 0.0, 90.0])
+        self.tool_offsets = [[0.0] * 6 for _ in range(11)]   # slot 0 = flange
+        self.tool_id = 0
+        self.user_offsets = [[0.0] * 6 for _ in range(11)]   # slot 0 = base
+        self.user_id = 0
+        self.clsn_level = 3
+        # a stored program is faked as N lines that tick by once a second (no motion)
+        self.program = dict(name="", state="idle", line=0, t=0.0, lines=10)
 
     # ------------------------------------------------------------ helpers
     def _event(self, msg):
@@ -182,6 +191,8 @@ class SimRobot:
             self.motion = None
             self.jog = None
             self.qd = [0.0] * 6
+            if self.program["state"] != "idle":
+                self.program.update(state="idle", line=0)
 
     def jog_joint(self, j, vel):
         """Continuous joint jog. j 0..5, vel deg/s (signed). vel=0 stops."""
@@ -277,9 +288,74 @@ class SimRobot:
             self.last_cmd_id = cmd_id
             self._event(f"MoveL -> {[round(v, 1) for v in tgt]}")
 
-    def set_tool_offset(self, off):
+    def set_tool_offset(self, off, slot=None):
         with self.lock:
-            self.arm.tool = list(map(float, off))
+            slot = self.tool_id if slot is None else int(slot)
+            if not 0 <= slot <= 10:
+                return "tool id must be 0..10"
+            self.tool_offsets[slot] = list(map(float, off))
+            if slot == self.tool_id:
+                self.arm.tool = list(self.tool_offsets[slot])
+
+    def set_tool_id(self, slot):
+        with self.lock:
+            if not 0 <= int(slot) <= 10:
+                return "tool id must be 0..10"
+            self.tool_id = int(slot)
+            self.arm.tool = list(self.tool_offsets[self.tool_id])
+            self._event(f"tool -> {self.tool_id}")
+
+    def set_user_offset(self, off, slot):
+        with self.lock:
+            if not 0 <= int(slot) <= 10:
+                return "user frame id must be 0..10"
+            self.user_offsets[int(slot)] = list(map(float, off))
+
+    def set_user_id(self, slot):
+        with self.lock:
+            if not 0 <= int(slot) <= 10:
+                return "user frame id must be 0..10"
+            self.user_id = int(slot)
+
+    def set_payload(self, mass, centroid):
+        with self.lock:
+            if not 0 <= float(mass) <= self.arm.profile["payload"]:
+                return f"mass must be 0..{self.arm.profile['payload']} kg"
+            self.payload = dict(mass=float(mass), centroid=list(map(float, centroid)))
+            self._event(f"payload -> {self.payload['mass']} kg")
+
+    # ------------------------------------------------------------ stored programs
+    def load_program(self, name):
+        with self.lock:
+            if self.program["state"] != "idle":
+                return "a program is running"
+            if not name:
+                return "program name is empty"
+            self.program.update(name=str(name), line=0, t=0.0)
+            self._event(f"loaded program {name}")
+
+    def play_program(self):
+        with self.lock:
+            err = self._ready()
+            if err:
+                return err
+            if not self.program["name"]:
+                return "no program loaded"
+            if self.program["state"] != "idle":
+                return "a program is already running"
+            self.program.update(state="running", line=1, t=0.0)
+            self._event(f"run {self.program['name']}")
+
+    def pause_program(self):
+        with self.lock:
+            if self.program["state"] == "running":
+                self.program["state"] = "paused"
+
+    def resume_program(self):
+        with self.lock:
+            if self.program["state"] != "paused":
+                return "program is not paused"
+            self.program["state"] = "running"
 
     def set_dout(self, idx, val):
         with self.lock:
@@ -315,6 +391,13 @@ class SimRobot:
             prev_q = list(self.q)
             prev_tcp = list(self.tcp)
             sdt = dt * self.rapid_rate  # speed override scales time
+            pg = self.program
+            if pg["state"] == "running":
+                pg["t"] += sdt
+                pg["line"] = 1 + int(pg["t"])
+                if pg["line"] > pg["lines"]:
+                    pg.update(state="idle", line=0)
+                    self._event(f"program {pg['name']} finished")
             if self.motion:
                 self._step_motion(sdt)
             elif self.jog:

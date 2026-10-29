@@ -164,6 +164,13 @@ class SimRobot {
     this.din = new Array(128).fill(0); this.dout = new Array(128).fill(0);
     this.motion = null; this.jog = null; this.log = [];
     this.jointTemp = [30, 30, 30, 30, 30, 30]; this.cabTemp = 32;
+    // controller configuration (what Cobot Expert's setup pages edit)
+    this.payload = {mass: 1, centroid: [0, 0, 90]};
+    this.toolOffsets = Array.from({length: 11}, () => [0, 0, 0, 0, 0, 0]); this.toolId = 0;   // slot 0 = flange
+    this.userOffsets = Array.from({length: 11}, () => [0, 0, 0, 0, 0, 0]); this.userId = 0;   // slot 0 = base
+    this.clsnLevel = 3;
+    // a stored program is faked as N lines that tick by once a second (no motion)
+    this.program = {name: "", state: "idle", line: 0, t: 0, lines: 10};
   }
   event(m) { this.log.push(m); if (this.log.length > 50) this.log.shift(); }
   fault(code, msg) { this.errcode = code; this.errmsg = msg; this.motion = this.jog = null; this.event(`ERROR ${code}: ${msg}`); }
@@ -183,7 +190,19 @@ class SimRobot {
   setEstop(on) { this.estop = !!on; if (on) { this.enabled = this.powered = false; this.motion = this.jog = null; this.event("EMERGENCY STOP pressed"); } else this.event("emergency stop released"); }
   setProtectiveStop() { this.protectiveStop = true; this.motion = this.jog = null; this.event("protective stop (simulated collision)"); }
   clearError() { this.errcode = 0; this.errmsg = ""; this.protectiveStop = false; this.onSoftLimit = false; this.event("errors cleared"); }
-  stop() { this.motion = this.jog = null; }
+  stop() { this.motion = this.jog = null; if (this.program.state !== "idle") Object.assign(this.program, {state: "idle", line: 0}); }
+  slot(n, what) { n = +n; if (!(n >= 0 && n <= 10)) throw new Error(what + " id must be 0..10"); return n; }
+  loadProgram(name) {
+    if (this.program.state !== "idle") return "a program is running";
+    if (!name) return "program name is empty";
+    Object.assign(this.program, {name: String(name), line: 0, t: 0}); this.event("loaded program " + name);
+  }
+  playProgram() {
+    const e = this.ready(); if (e) return e;
+    if (!this.program.name) return "no program loaded";
+    if (this.program.state !== "idle") return "a program is already running";
+    Object.assign(this.program, {state: "running", line: 1, t: 0}); this.event("run " + this.program.name);
+  }
   jogJoint(j, vel) { if (!vel) { this.jog = null; return; } const e = this.ready(); if (e) return e; this.motion = null; this.jog = {kind: "joint", axis: j, vel}; }
   jogCart(axis, vel, frame) { if (!vel) { this.jog = null; return; } const e = this.ready(); if (e) return e; this.motion = null; this.jog = {kind: "cart", axis, vel, frame}; }
   moveJoint(target, speed = 30, accel = 100, rel = false) {
@@ -209,7 +228,11 @@ class SimRobot {
     this.event("MoveL -> " + JSON.stringify(tgt.map(v => +v.toFixed(1))));
   }
   step(dt) {
-    const prevQ = this.q.slice(), prevTcp = this.tcp.slice();
+    const prevQ = this.q.slice(), prevTcp = this.tcp.slice(), pg = this.program;
+    if (pg.state === "running") {
+      pg.t += dt * this.rapidRate; pg.line = 1 + Math.floor(pg.t);
+      if (pg.line > pg.lines) { Object.assign(pg, {state: "idle", line: 0}); this.event(`program ${pg.name} finished`); }
+    }
     if (this.motion) this.stepMotion(dt * this.rapidRate);
     else if (this.jog) this.stepJog(dt);
     for (let i = 0; i < 6; i++) {
@@ -278,7 +301,29 @@ class SimRobot {
           break;
         }
         case "set_digital_output": this.dout[+msg.index] = +msg.value ? 1 : 0; break;
-        case "set_tool_offsets": this.arm.tool = msg.tooloffset.map(Number); break;
+        case "set_tool_offsets": {
+          const n = msg.id == null ? this.toolId : this.slot(msg.id, "tool");
+          this.toolOffsets[n] = msg.tooloffset.map(Number); if (n === this.toolId) this.arm.tool = this.toolOffsets[n].slice(); break;
+        }
+        case "get_tool_offsets": return ok({tool_offsets: this.toolOffsets.map(t => t.slice())});
+        case "set_tool_id": this.toolId = this.slot(msg.tool_id, "tool"); this.arm.tool = this.toolOffsets[this.toolId].slice(); this.event("tool -> " + this.toolId); break;
+        case "get_user_offsets": return ok({user_offsets: this.userOffsets.map(u => u.slice())});
+        case "set_user_offsets": this.userOffsets[this.slot(msg.id, "user frame")] = msg.userffset.map(Number); break;  // sic: JAKA's key
+        case "set_user_id": this.userId = this.slot(msg.user_frame_id, "user frame"); break;
+        case "get_payload": return ok({mass: this.payload.mass, centroid: this.payload.centroid.slice()});
+        case "set_payload":
+          if (!(+msg.mass >= 0 && +msg.mass <= this.arm.profile.payload)) e = `mass must be 0..${this.arm.profile.payload} kg`;
+          else { this.payload = {mass: +msg.mass, centroid: msg.centroid.map(Number)}; this.event(`payload -> ${this.payload.mass} kg`); }
+          break;
+        case "get_clsn_sensitivity": return ok({sensitivityLevel: this.clsnLevel});
+        case "load_program": e = this.loadProgram(msg.programName); break;
+        case "play_program": e = this.playProgram(); break;
+        case "pause_program": if (this.program.state === "running") this.program.state = "paused"; break;
+        case "resume_program": if (this.program.state !== "paused") e = "program is not paused"; else this.program.state = "running"; break;
+        case "get_program_state": return ok({programState: this.program.state});
+        case "get_loaded_program": return ok({programName: this.program.name});
+        case "get_current_line": return ok({current_line: this.program.line});
+        case "get_data": return ok({current_tool_id: this.toolId, current_user_id: this.userId});
         case "sim_estop": e = this.setEstop(msg.on !== false); break;
         case "sim_protective_stop": e = this.setProtectiveStop(); break;
         case "sim_control_source": this.controlSource = msg.source === "remote" ? "remote" : "local"; this.event("control source -> " + this.controlSource); break;

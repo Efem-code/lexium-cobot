@@ -177,7 +177,37 @@ def handle_command(robot, msg):
         elif cmd == "get_digital_input_status":
             return _ok(cmd, din_status=s()["din"][:16])
         elif cmd == "set_tool_offsets":
-            e = robot.set_tool_offset(msg["tooloffset"])
+            e = robot.set_tool_offset(msg["tooloffset"], msg.get("id"))
+        elif cmd == "get_tool_offsets":
+            return _ok(cmd, tool_offsets=[list(t) for t in robot.tool_offsets])
+        elif cmd == "set_tool_id":
+            e = robot.set_tool_id(int(msg["tool_id"]))
+        elif cmd == "get_user_offsets":
+            return _ok(cmd, user_offsets=[list(u) for u in robot.user_offsets])
+        elif cmd == "set_user_offsets":
+            e = robot.set_user_offset(msg["userffset"], int(msg["id"]))  # sic: JAKA's key
+        elif cmd == "set_user_id":
+            e = robot.set_user_id(int(msg["user_frame_id"]))
+        elif cmd == "get_payload":
+            return _ok(cmd, mass=robot.payload["mass"], centroid=list(robot.payload["centroid"]))
+        elif cmd == "set_payload":
+            e = robot.set_payload(msg["mass"], msg["centroid"])
+        elif cmd == "get_clsn_sensitivity":
+            return _ok(cmd, sensitivityLevel=robot.clsn_level)
+        elif cmd == "load_program":
+            e = robot.load_program(msg["programName"])
+        elif cmd == "play_program":
+            e = robot.play_program()
+        elif cmd == "pause_program":
+            e = robot.pause_program()
+        elif cmd == "resume_program":
+            e = robot.resume_program()
+        elif cmd == "get_program_state":
+            return _ok(cmd, programState=robot.program["state"])
+        elif cmd == "get_loaded_program":
+            return _ok(cmd, programName=robot.program["name"])
+        elif cmd == "get_current_line":
+            return _ok(cmd, current_line=robot.program["line"])
         elif cmd == "get_data":
             return _ok(cmd, **status_payload(robot))
         elif cmd == "quit":
@@ -219,6 +249,8 @@ def status_payload(robot):
         "dout": st["dout"][:16],
         "din": st["din"][:16],
         "tool_offset": st["tool"],
+        "current_tool_id": robot.tool_id,
+        "current_user_id": robot.user_id,
         "control_source": st["control_source"],
         "model": st["model"],
         "cmd_id": st["cmd_id"],
@@ -309,7 +341,7 @@ class JakaClient:
     def connected(self):
         return self.sock is not None
 
-    def send(self, cmd_name, **fields):
+    def send(self, cmd_name, /, **fields):
         msg = {"cmdName": cmd_name}
         msg.update(fields)
         with self.lock:

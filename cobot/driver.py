@@ -30,7 +30,11 @@ def _jog_stop_fields(active):
 
 
 MOTION_CMDS = {"joint_move", "end_move", "moveL", "jog", "power_on", "enable_robot",
-               "set_digital_output", "set_tool_offsets"}
+               "set_digital_output", "set_tool_offsets", "set_tool_id", "set_user_offsets",
+               "set_user_id", "set_payload", "load_program", "play_program", "resume_program"}
+# Safety settings stay in Cobot Expert: the bridge never sends these to the real cobot.
+SAFETY_CMDS = {"set_clsn_sensitivity", "set_collision_level", "set_safety_config", "set_joint_limit",
+               "set_soft_limit", "set_reduce_mode", "set_installation_angle", "shutdown"}
 
 # The real controller doesn't answer set_rapidrate (its own override stays at 100%),
 # so on the real cobot the bridge scales every speed itself.
@@ -188,13 +192,15 @@ class CobotDriver:
                     self.last_error = f"jog stop failed: {e}"
 
     # ----------------------------------------------------------- commands
-    def command(self, name, **fields):
+    def command(self, name, /, **fields):
         if not self.connected:
             raise RuntimeError("not connected")
         if self.mode == "real" and not self.motion_armed and name in MOTION_CMDS:
             raise PermissionError("Real cobot is READ-ONLY until motion is armed")
         if self.mode == "real" and name.startswith("sim_"):
             raise PermissionError("simulator-only command")
+        if self.mode == "real" and name in SAFETY_CMDS:
+            raise PermissionError("safety settings are view-only here; change them in Cobot Expert")
         if self.mode == "real":
             if name == "set_rapidrate":
                 with self.lock:

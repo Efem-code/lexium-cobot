@@ -77,6 +77,13 @@ th{color:var(--mute);font-weight:500}
 td:first-child,th:first-child{text-align:left}
 .wp{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
 .wp:last-child{border:0}
+.grid4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.grid6{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:6px 0}
+.grid4 input,.grid6 input,.cfg select{width:100%}
+.cfg{display:flex;flex-direction:column;gap:6px}
+.cfgh{margin-top:8px;font-weight:600;color:var(--text);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.cfg .wbtn{align-self:flex-start}
+.ok-msg{color:#bff5c9}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{border:0;border-radius:0;background:transparent;padding:5px 10px}
 .seg button.sel{background:var(--accent2)}
@@ -184,6 +191,34 @@ td:first-child,th:first-child{text-align:left}
       </div>
     </div>
 
+    <div class="card" data-tab="setup" id="cfgCard">
+      <div class="row" style="justify-content:space-between"><h2>Cobot setup</h2><button id="cfgRead">Read from cobot</button></div>
+      <div class="cfg">
+        <div class="cfgh">Payload <span class="note" style="margin:0">(must match what's on the arm)</span></div>
+        <div class="grid4">
+          <label class="f">Mass kg<input id="plM" inputmode="decimal"></label>
+          <label class="f">CoM X mm<input id="plX" inputmode="decimal"></label>
+          <label class="f">CoM Y mm<input id="plY" inputmode="decimal"></label>
+          <label class="f">CoM Z mm<input id="plZ" inputmode="decimal"></label>
+        </div>
+        <button id="plSet" class="wbtn">Apply payload</button>
+
+        <div class="cfgh">Tool (TCP) <span class="note" style="margin:0">active: <b id="toolAct">—</b></span></div>
+        <div class="row"><label class="f" style="flex:1">Slot<select id="toolSlot"></select></label></div>
+        <div class="grid6" id="toolOff"></div>
+        <div class="row"><button id="toolSet" class="wbtn">Save slot</button><button id="toolUse" class="wbtn">Use this tool</button></div>
+
+        <div class="cfgh">User frame <span class="note" style="margin:0">active: <b id="userAct">—</b></span></div>
+        <div class="row"><label class="f" style="flex:1">Slot<select id="userSlot"></select></label></div>
+        <div class="grid6" id="userOff"></div>
+        <div class="row"><button id="userSet" class="wbtn">Save slot</button><button id="userUse" class="wbtn">Use this frame</button></div>
+
+        <div class="cfgh">Safety <span class="note" style="margin:0">(view only; change in Cobot Expert)</span></div>
+        <div class="light">Collision sensitivity: <b id="clsn" style="color:var(--text)">—</b></div>
+      </div>
+      <div class="note" id="cfgMsg">Changes need <b>Arm motion</b> ticked. Each change is read back from the cobot to confirm it took.</div>
+    </div>
+
     <div class="card" data-tab="robot">
       <h2>Robot</h2>
       <div class="lights" id="lights"></div>
@@ -231,6 +266,16 @@ td:first-child,th:first-child{text-align:left}
         <span id="cycles"></span>
       </div>
       <div id="wps" style="color:var(--mute)">No waypoints yet.</div>
+    </div>
+    <div class="card" data-tab="points" id="progCard">
+      <h2>Programs on the cobot</h2>
+      <div class="row"><input id="progName" list="progNames" placeholder="Program name (as saved in Cobot Expert)" style="flex:1" autocomplete="off"><datalist id="progNames"></datalist><button id="progLoad" class="wbtn">Load</button></div>
+      <div class="grid4" style="margin-top:6px">
+        <button id="progRun" class="primary wbtn">Run</button><button id="progPause">Pause</button>
+        <button id="progResume" class="wbtn">Resume</button><button id="progStop" class="danger">Stop</button>
+      </div>
+      <div class="light" style="margin-top:8px">Loaded: <b id="progLoaded" style="color:var(--text)">—</b> · <b id="progState" style="color:var(--text)">—</b> · line <b id="progLine" style="color:var(--text)">—</b></div>
+      <div class="note">Programs run at the speeds saved in them: this page's speed limit doesn't apply. Keep the pendant E-stop in reach. The cobot can't list its programs, so type the name; names you load are remembered here.</div>
     </div>
     <div class="card" data-tab="data">
       <h2>Digital I/O</h2>

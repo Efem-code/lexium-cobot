@@ -132,6 +132,41 @@ r = d.command("joint_move", relFlag=0, jointPosition=K.HOME, speed=50, accel=100
 check("motion refused when control source is Local", not ok(r), r.get("errorMsg"))
 d.command("sim_control_source", source="remote")
 
+# controller configuration (what Cobot Expert's setup pages edit)
+check("set_payload", ok(d.command("set_payload", mass=1.5, centroid=[0, 0, 60]))
+      and d.command("get_payload")["mass"] == 1.5)
+check("payload above rated load refused", not ok(d.command("set_payload", mass=99, centroid=[0, 0, 0])))
+tcp0 = d.command("get_tcp_pos")["tcp_pos"]
+d.command("set_tool_offsets", id=2, tooloffset=[0, 0, 100, 0, 0, 0], name="tool2")
+check("tool slot 2 stored", d.command("get_tool_offsets")["tool_offsets"][2][2] == 100)
+d.command("set_tool_id", tool_id=2)
+time.sleep(0.1)  # the sim recomputes the TCP on its next tick
+tcp1 = d.command("get_tcp_pos")["tcp_pos"]
+check("active tool 2 moves the TCP 100 mm", d.command("get_data")["current_tool_id"] == 2
+      and abs(math.dist(tcp0[:3], tcp1[:3]) - 100) < 0.01)
+d.command("set_tool_id", tool_id=0)
+d.command("set_user_offsets", id=1, userffset=[10, 0, 0, 0, 0, 0], name="user1")
+d.command("set_user_id", user_frame_id=1)
+check("user frame 1 stored + active", d.command("get_user_offsets")["user_offsets"][1][0] == 10
+      and d.command("get_data")["current_user_id"] == 1)
+check("collision sensitivity readable", d.command("get_clsn_sensitivity")["sensitivityLevel"] == 3)
+
+# programs stored on the controller
+check("load_program", ok(d.command("load_program", programName="demo"))
+      and d.command("get_loaded_program")["programName"] == "demo")
+check("play_program", ok(d.command("play_program"))
+      and d.command("get_program_state")["programState"] == "running")
+check("program advances", wait(lambda: d.command("get_current_line")["current_line"] >= 2, 4))
+d.command("pause_program")
+l1 = d.command("get_current_line")["current_line"]
+time.sleep(1.2)
+check("pause holds the line", d.command("get_program_state")["programState"] == "paused"
+      and d.command("get_current_line")["current_line"] == l1)
+check("resume_program", ok(d.command("resume_program"))
+      and d.command("get_program_state")["programState"] == "running")
+d.stop_all()
+check("STOP ends the program", d.command("get_program_state")["programState"] == "idle")
+
 # real-mode read-only guard
 d2 = CobotDriver()
 d2.connect("127.0.0.1", "real", MB, CMD, ST)
@@ -140,6 +175,19 @@ try:
     check("real mode is read-only until armed", False)
 except PermissionError:
     check("real mode is read-only until armed", True)
+for name, fields in (("set_payload", dict(mass=1, centroid=[0, 0, 0])), ("load_program", dict(programName="x"))):
+    try:
+        d2.command(name, **fields)
+        check(f"{name} needs arming on real", False)
+    except PermissionError:
+        check(f"{name} needs arming on real", True)
+d2.motion_armed = True
+try:
+    d2.command("set_clsn_sensitivity", sensitivityLevel=1)
+    check("safety settings blocked on real even when armed", False)
+except PermissionError:
+    check("safety settings blocked on real even when armed", True)
+d2.motion_armed = False
 # real mode: the bridge scales speeds itself (controller ignores set_rapidrate)
 check("real mode starts at 10% speed", abs(d2.speed - 0.10) < 1e-9 and d2.status()["speed_override"] == 10)
 d2.motion_armed = True
