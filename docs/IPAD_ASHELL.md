@@ -10,13 +10,12 @@ app, and Safari on the same iPad opens it at `http://127.0.0.1:8765`.
 
    ```
    cd ~/Documents
-   curl -L -o lexium.zip https://github.com/Efem-code/lexium-cobot/archive/refs/heads/main.zip
-   tar -xf lexium.zip
+   curl -L -o lexium.tar.gz https://github.com/Efem-code/lexium-cobot/archive/refs/heads/main.tar.gz
+   tar -xzf lexium.tar.gz
    cd lexium-cobot-main
    python3 ipad.py --sim
    ```
 
-   If `tar` doesn't unpack the zip, use `unzip lexium.zip` instead.
 3. Open Safari at `http://127.0.0.1:8765`. You should see the simulator.
    This checks everything works before you go near the cobot.
 4. Back in a-Shell press **Ctrl+C** (on-screen keyboard: the `^` key, then `c`) to stop.
@@ -50,9 +49,9 @@ Join a Wi-Fi with internet, then in a-Shell:
 
 ```
 cd ~/Documents
-rm -rf lexium-cobot-main lexium.zip
-curl -L -o lexium.zip https://github.com/Efem-code/lexium-cobot/archive/refs/heads/main.zip
-tar -xf lexium.zip
+rm -rf lexium-cobot-main lexium.tar.gz
+curl -L -o lexium.tar.gz https://github.com/Efem-code/lexium-cobot/archive/refs/heads/main.tar.gz
+tar -xzf lexium.tar.gz
 ```
 
 Waypoints are kept: they live in Safari, not in this folder.
