@@ -338,10 +338,6 @@ function render() {
   const cfgKey = S.connected && !S.bridge_down && (S.joints || S.mode === "demo") ? `${S.mode}|${S.host}` : null;
   if (cfgKey && cfgKey !== CFG.key) { CFG.key = cfgKey; readCfg().catch(() => {}); pollProg(true); }
   if (!cfgKey) CFG.key = null;
-  // real cobot: the bridge enforces the speed limit, so show its value
-  if (S.mode === "real" && S.speed_override != null)
-    for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]])
-      if (document.activeElement !== $(sl)) { $(sl).value = S.speed_override; $(lab).textContent = S.speed_override + "%"; }
   const L =[["Power", S.powered, "on"], ["Enabled", S.enabled, "on"], ["E-stop", S.estop, "red"], ["Prot. stop", S.protective_stop, "red"],
              ["Soft limit", S.on_soft_limit, "amber"], ["In position", S.inpos, "on"], ["Jogging", S.jogging, "amber"]];
   // the real controller doesn't report a control source; only the simulator models it
@@ -355,10 +351,14 @@ function render() {
     S.tcp.forEach((v, i) => $("cv" + i).textContent = v.toFixed(i < 3 ? 1 : 2) + (i < 3 ? "" : "°"));
     $("live").innerHTML = "<tr><th></th><th>°/s</th><th>A</th><th>°C</th><th>V</th></tr>" + JN.map((n, i) =>
       `<tr><td>${n}</td><td>${S.joint_speed[i].toFixed(1)}</td><td>${S.joint_current[i].toFixed(2)}</td><td>${S.joint_temp[i]}</td><td>${S.joint_voltage[i]}</td></tr>`).join("");
-    $("cab").textContent = `${S.cab_temp.toFixed(1)} °C · ${S.cab_power.toFixed(0)} W · speed ${S.speed_ratio.toFixed(0)}%`;
+    // real cobot: its own override stays at 100% (it ignores set_rapidrate); the bridge's limit is what applies
+    const spd = S.mode === "real" && S.speed_override != null ? `speed limit ${S.speed_override}%` : `speed ${S.speed_ratio.toFixed(0)}%`;
+    $("cab").textContent = `${S.cab_temp.toFixed(1)} °C · ${S.cab_power.toFixed(0)} W · ${spd}`;
     for (let k = 0; k < 16; k++) { $("do" + k).classList.toggle("on", !!(S.dout && S.dout[k])); $("di" + k).classList.toggle("on", !!(S.din && S.din[k])); }
+    // real cobot: the bridge enforces the limit (the cobot's own override stays at 100%)
+    const eff = Math.round(S.mode === "real" && S.speed_override != null ? S.speed_override : S.speed_ratio);
     for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]])
-      if (document.activeElement !== $(sl)) { $(sl).value = Math.round(S.speed_ratio); $(lab).textContent = Math.round(S.speed_ratio) + "%"; }
+      if (document.activeElement !== $(sl)) { $(sl).value = eff; $(lab).textContent = eff + "%"; }
   }
   if (S.log) $("log").innerHTML = S.log.slice().reverse().map(l => `<div>${String(l).replace(/</g, "&lt;")}</div>`).join("");
   for (const sel of ["model", "modelDemo"])
