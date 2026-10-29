@@ -175,13 +175,19 @@ function drawWps() {
   const W = $("wps"); if (!waypoints.length) { W.textContent = "No waypoints yet."; return; }
   W.innerHTML = ""; waypoints.forEach((w, i) => {
     const d = document.createElement("div"); d.className = "wp";
-    d.innerHTML = `<span class="mono">P${i + 1} ${w.tcp.slice(0, 3).map(v => v.toFixed(0)).join(", ")}</span><span class="row"><button>Go</button><button>✕</button></span>`;
-    const [g, x] = d.querySelectorAll("button");
-    g.onclick = () => cmd("joint_move", {relFlag: 0, jointPosition: w.joints, speed: jspeed(), accel: 100});
+    const mv = w.move === "L" ? "L" : "J";
+    d.innerHTML = `<span class="mono">P${i + 1} ${w.tcp.slice(0, 3).map(v => v.toFixed(0)).join(", ")}</span><span class="row"><button class="mv ${mv}" title="J = joint move, L = straight line">${mv}</button><button>Go</button><button>✕</button></span>`;
+    const [m, g, x] = d.querySelectorAll("button");
+    m.onclick = () => { w.move = mv === "L" ? "J" : "L"; drawWps(); };
+    g.onclick = () => wpMove(w);
     x.onclick = () => { waypoints.splice(i, 1); drawWps(); };
     W.appendChild(d);
   });
 }
+const lspeed = () => +$("cspd").value * 2;
+const wpMove = w => w.move === "L"
+  ? cmd("moveL", {relFlag: 0, cartPosition: w.tcp, speed: lspeed(), accel: 500})
+  : cmd("joint_move", {relFlag: 0, jointPosition: w.joints, speed: jspeed(), accel: 100});
 let playing = false;
 try { $("loop").checked = localStorage.getItem("loop") === "1"; $("dwell").value = localStorage.getItem("dwell") || "0"; } catch (_) {}
 $("loop").onchange = e => { try { localStorage.setItem("loop", e.target.checked ? "1" : "0"); } catch (_) {} };
@@ -197,7 +203,7 @@ async function playWps() {
     cycle++; $("cycles").textContent = "cycle " + cycle;
     for (const w of waypoints) {
       if (!playing) break;
-      const r = await cmd("joint_move", {relFlag: 0, jointPosition: w.joints, speed: jspeed(), accel: 100});
+      const r = await wpMove(w);
       if (r.errorCode !== "0") { playing = false; break; }
       await sleep(250);
       while (playing && S.inpos === false) await sleep(50);
@@ -326,6 +332,225 @@ $("progResume").onclick = async () => {
   await cmd("resume_program"); pollProg(true);
 };
 $("progStop").onclick = async () => { await cmd("stop_program"); pollProg(true); };
+
+// ------------------------------------------------------------ waypoint files
+function download(name, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+$("wpExport").onclick = () => {
+  if (!waypoints.length) { toast("No waypoints to export"); return; }
+  download(`waypoints-${stamp()}.json`, JSON.stringify({format: "lexium-cobot-waypoints", version: 1, model: S.model,
+    loop: $("loop").checked, pause_s: +$("dwell").value || 0, points: waypoints}, null, 2), "application/json");
+};
+$("wpImport").onclick = () => $("wpFile").click();
+$("wpFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text()), pts = Array.isArray(j) ? j : j.points;
+    if (!Array.isArray(pts) || !pts.every(p => Array.isArray(p.joints) && p.joints.length === 6 && Array.isArray(p.tcp)))
+      throw new Error("not a waypoint file");
+    if (waypoints.length && !confirm(`Replace the ${waypoints.length} current waypoints with ${pts.length} from ${f.name}?`)) return;
+    waypoints = pts.map(p => ({joints: p.joints.map(Number), tcp: p.tcp.map(Number), move: p.move === "L" ? "L" : "J"}));
+    if (j.loop != null) $("loop").checked = !!j.loop;
+    if (j.pause_s != null) $("dwell").value = j.pause_s;
+    drawWps(); toast(`Loaded ${waypoints.length} waypoints`);
+  } catch (err) { toast("Import failed: " + err.message); }
+};
+$("wpClear").onclick = () => { if (waypoints.length && confirm("Delete all waypoints?")) { waypoints = []; drawWps(); } };
+
+// ------------------------------------------------------------ scripting (JavaScript, same names as the Python SDK)
+const r1 = v => +(+v).toFixed(2);
+function wpScript() {
+  if (!waypoints.length) return "// teach some waypoints first\n";
+  const lines = ["// generated from waypoints: edit freely", "await robot.speed(" + (S.speed_override ?? Math.round(S.speed_ratio || 100)) + ");", "",
+    "const loops = " + ($("loop").checked ? "5" : "1") + ";", "for (let n = 1; n <= loops; n++) {"];
+  waypoints.forEach((w, i) => {
+    lines.push(w.move === "L"
+      ? `  await robot.move_linear([${w.tcp.map(r1).join(", ")}], {speed: ${lspeed()}});   // P${i + 1}`
+      : `  await robot.move_joint([${w.joints.map(r1).join(", ")}], {speed: ${jspeed()}});   // P${i + 1}`);
+    const d = +$("dwell").value || 0;
+    if (d) lines.push(`  await sleep(${d});`);
+  });
+  lines.push("  log(`cycle ${n} of ${loops}`);", "}", "await robot.home();");
+  return lines.join("\n") + "\n";
+}
+const SC_EXAMPLES = {
+  "Square in the air": `// a 100 mm square, 50 mm below the current tool height
+await robot.speed(30);
+const [x, y, z] = robot.pose;
+for (const [dx, dy] of [[100, 0], [100, 100], [0, 100], [0, 0]]) {
+  await robot.move_linear({x: x + dx, y: y + dy, z: z - 50}, {speed: 150});
+  log("corner", robot.pose.slice(0, 3).map(v => v.toFixed(1)).join(", "));
+}
+`,
+  "Pick and place": `// DO0 = gripper (1 = closed), DI0 = part present. Teach your own poses.
+const PICK  = [400, -150, 150, 180, 0, 0];
+const PLACE = [400,  150, 150, 180, 0, 0];
+const above = (p, dz = 80) => [p[0], p[1], p[2] + dz, p[3], p[4], p[5]];
+await robot.speed(30);
+for (let n = 1; n <= 3; n++) {
+  // await robot.wait_di(0, true, 30);   // uncomment on the real cobot
+  await robot.move_pose(above(PICK));
+  await robot.set_do(0, false);
+  await robot.move_linear(PICK, {speed: 80});
+  await robot.set_do(0, true); await sleep(0.3);
+  await robot.move_linear(above(PICK));
+  await robot.move_pose(above(PLACE));
+  await robot.move_linear(PLACE, {speed: 80});
+  await robot.set_do(0, false); await sleep(0.3);
+  await robot.move_linear(above(PLACE));
+  log("cycle", n, "done");
+}
+await robot.home();
+`,
+  "Joint wave": `// wiggle the wrist joints from the current pose
+await robot.speed(40);
+const q = robot.joints;
+for (let i = 0; i < 3; i++) {
+  await robot.move_joint([0, 0, 0, 15, 15, 30], {relative: true, speed: 60});
+  await robot.move_joint([0, 0, 0, -15, -15, -30], {relative: true, speed: 60});
+}
+await robot.move_joint(q);
+`,
+  "Wait for an input": `// waits (up to 60 s) for DI0, then blinks DO1 three times
+log("waiting for DI0...");
+await robot.wait_di(0, true, 60);
+for (let i = 0; i < 3; i++) { await robot.set_do(1, true); await sleep(0.5); await robot.set_do(1, false); await sleep(0.5); }
+log("done");
+`,
+};
+const SC_DOC = `robot.joints / robot.pose / robot.state      current joints, TCP pose [x,y,z,rx,ry,rz], full status
+await robot.move_joint([j1..j6], {speed, accel, relative})      joint move, waits until stopped
+await robot.move_linear([x,y,z,rx,ry,rz] or {z: 200}, {speed, accel, relative})   straight line
+await robot.move_pose([x,y,z,rx,ry,rz], {speed})   reach a pose with a joint move
+await robot.home()      await robot.stop()      await robot.speed(percent)
+await robot.power_on() / power_off() / enable() / disable() / clear_error()
+await robot.set_do(i, true)    robot.do(i)    robot.di(i)    await robot.wait_di(i, true, timeout_s)
+await robot.set_payload(kg, [x,y,z])    await robot.use_tool(slot)
+await robot.run_program(name)    await robot.program_state()
+P[0].joints / P[0].tcp      your waypoints        await sleep(seconds)      log(...)
+Add {wait: false} to a move to continue straight away. Stop aborts at the next command.
+Same names as the Python SDK (cobot/sdk.py).`;
+for (const k of Object.keys(SC_EXAMPLES)) $("scExample").insertAdjacentHTML("beforeend", `<option>${k}</option>`);
+$("scExample").insertAdjacentHTML("beforeend", "<option>From waypoints</option>");
+try { $("scCode").value = localStorage.getItem("script") || SC_EXAMPLES["Square in the air"]; } catch (_) { $("scCode").value = SC_EXAMPLES["Square in the air"]; }
+$("scCode").addEventListener("input", () => { try { localStorage.setItem("script", $("scCode").value); } catch (_) {} });
+$("scCode").addEventListener("keydown", e => {   // Tab indents instead of leaving the editor
+  if (e.key !== "Tab") return; e.preventDefault();
+  const t = e.target, a = t.selectionStart; t.setRangeText("  ", a, t.selectionEnd, "end");
+});
+$("scExample").onchange = e => {
+  const k = e.target.value; e.target.value = ""; if (!k) return;
+  if ($("scCode").value.trim() && !confirm("Replace the current script?")) return;
+  $("scCode").value = k === "From waypoints" ? wpScript() : SC_EXAMPLES[k];
+  $("scCode").dispatchEvent(new Event("input"));
+};
+$("wpToScript").onclick = () => {
+  if ($("scCode").value.trim() && !confirm("Replace the current script with one made from the waypoints?")) return;
+  $("scCode").value = wpScript(); $("scCode").dispatchEvent(new Event("input"));
+  const tab = document.querySelector('#tabs button[data-tab="script"]'); if (getComputedStyle($("tabs")).display !== "none") tab.click();
+  toast("Script made from waypoints: see the Script card");
+};
+$("scHelp").onclick = () => { $("scDoc").textContent = SC_DOC; $("scDoc").style.display = $("scDoc").style.display === "none" ? "block" : "none"; };
+$("scSave").onclick = () => download(`cobot-script-${stamp()}.js`, $("scCode").value, "text/javascript");
+$("scOpen").onclick = () => $("scFile").click();
+$("scFile").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  $("scCode").value = await f.text(); $("scCode").dispatchEvent(new Event("input")); toast("Opened " + f.name);
+};
+
+function scLog(cls, ...a) {
+  const d = document.createElement("div"); if (cls) d.className = cls;
+  d.textContent = a.map(v => typeof v === "object" ? JSON.stringify(v) : String(v)).join(" ");
+  $("scOut").appendChild(d); $("scOut").scrollTop = 1e9;
+}
+let scRun = null;   // {aborted}
+function makeRobot(run) {
+  const live = () => { if (run.aborted) throw new Error("stopped"); };
+  const call = async (name, f = {}) => {
+    live();
+    const r = await cmd(name, f);
+    if (!okR(r)) throw new Error(`${name}: ${r.errorMsg || r.errorCode}`);
+    return r;
+  };
+  const opt = (o, k, d) => (o && o[k] != null ? o[k] : d);
+  const settle = async (timeout = 120) => {
+    await sleep(250);
+    const t0 = Date.now(); let still = 0;
+    while (true) {
+      live();
+      if (S.estop) throw new Error("emergency stop");
+      if (S.protective_stop) throw new Error("protective stop (collision?)");
+      if (S.errcode) throw new Error(`controller error ${S.errcode}: ${S.errmsg || ""}`);
+      still = S.inpos ? still + 1 : 0;
+      if (still >= 2) return;
+      if (Date.now() - t0 > timeout * 1000) throw new Error("move did not finish in time");
+      await sleep(50);
+    }
+  };
+  const AX = ["x", "y", "z", "rx", "ry", "rz"];
+  const robot = {
+    get state() { return S; }, get joints() { return (S.joints || []).slice(); }, get pose() { return (S.tcp || []).slice(); },
+    power_on: () => call("power_on"), power_off: () => call("power_off"), enable: () => call("enable_robot"),
+    disable: () => call("disable_robot"), clear_error: () => call("clear_error"),
+    stop: () => api("/api/stop", {}),
+    speed: pct => call("set_rapidrate", {rapid_rate: Math.max(1, Math.min(100, pct)) / 100}),
+    wait_until_stopped: settle,
+    async move_joint(q, o = {}) {
+      await call("joint_move", {relFlag: o.relative ? 1 : 0, jointPosition: q.map(Number), speed: opt(o, "speed", 30), accel: opt(o, "accel", 100)});
+      if (opt(o, "wait", true)) await settle();
+    },
+    async move_linear(p, o = {}) {
+      if (!Array.isArray(p)) { const base = o.relative ? [0, 0, 0, 0, 0, 0] : robot.pose; p = AX.map((a, i) => p[a] != null ? +p[a] : base[i]); }
+      await call("moveL", {relFlag: o.relative ? 1 : 0, cartPosition: p.map(Number), speed: opt(o, "speed", 100), accel: opt(o, "accel", 500)});
+      if (opt(o, "wait", true)) await settle();
+    },
+    async move_pose(p, o = {}) {
+      live();
+      const r = await api("/api/ik", {pose: p.map(Number), seed: robot.joints});
+      if (!r.joints || r.ok === false) throw new Error("pose is out of reach");
+      await robot.move_joint(r.joints, o);
+    },
+    home: (o = {}) => robot.move_joint(HOME, o),
+    set_do: (i, v = true) => call("set_digital_output", {type: 0, index: i, value: v ? 1 : 0}),
+    do: i => !!(S.dout || [])[i], di: i => !!(S.din || [])[i],
+    async wait_di(i, v = true, timeout = null) {
+      const t0 = Date.now();
+      while (robot.di(i) !== !!v) {
+        live();
+        if (timeout != null && Date.now() - t0 > timeout * 1000) throw new Error(`DI${i} did not become ${v ? 1 : 0} within ${timeout} s`);
+        await sleep(20);
+      }
+    },
+    set_payload: (kg, c = [0, 0, 0]) => call("set_payload", {mass: +kg, centroid: c.map(Number)}),
+    use_tool: n => call("set_tool_id", {tool_id: +n}),
+    async run_program(name) { if (name) await call("load_program", {programName: name}); await call("play_program"); },
+    program_state: async () => (await call("get_program_state")).programState,
+    command: call,
+  };
+  return robot;
+}
+$("scRun").onclick = async () => {
+  if (scRun) { toast("A script is already running"); return; }
+  if (S.mode === "real" && !confirm("Run this script on the REAL cobot?\n\nThe bridge limits and speed limit apply. Keep the E-stop in reach.")) return;
+  const run = scRun = {aborted: false};
+  $("scOut").innerHTML = ""; $("scRun").disabled = true;
+  const Async = Object.getPrototypeOf(async function () {}).constructor;
+  const t0 = Date.now();
+  try {
+    const fn = new Async("robot", "sleep", "log", "P", $("scCode").value);
+    await fn(makeRobot(run), async s => { const end = Date.now() + s * 1000; while (Date.now() < end) { if (run.aborted) throw new Error("stopped"); await sleep(Math.min(50, end - Date.now())); } },
+      (...a) => scLog("", ...a), waypoints.map(w => ({...w})));
+    scLog("", `✓ finished in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  } catch (e) {
+    scLog("e", (run.aborted ? "■ " : "✗ ") + e.message);
+    if (!run.aborted) api("/api/stop", {});
+  } finally { scRun = null; $("scRun").disabled = false; }
+};
+$("scStop").onclick = () => { if (scRun) scRun.aborted = true; api("/api/stop", {}); };
 
 // ------------------------------------------------------------ status rendering
 let shownMode = null;

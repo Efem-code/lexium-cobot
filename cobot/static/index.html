@@ -84,6 +84,11 @@ td:first-child,th:first-child{text-align:left}
 .cfgh{margin-top:8px;font-weight:600;color:var(--text);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .cfg .wbtn{align-self:flex-start}
 .ok-msg{color:#bff5c9}
+#scCode{width:100%;min-height:260px;resize:vertical;font:12px/1.45 Consolas,ui-monospace,monospace;color:var(--text);background:#111214;border:1px solid var(--line);border-radius:6px;padding:8px;tab-size:2;margin-top:6px}
+#scOut{max-height:160px;margin-top:6px;white-space:pre-wrap}
+#scOut .e{color:#ffb4b6}
+.wp .mv{min-width:30px;padding:3px 6px;font-weight:700}
+.wp .mv.L{color:var(--accent);border-color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{border:0;border-radius:0;background:transparent;padding:5px 10px}
 .seg button.sel{background:var(--accent2)}
@@ -119,7 +124,8 @@ td:first-child,th:first-child{text-align:left}
   .jog{grid-template-columns:34px 1fr 64px 64px;gap:8px;margin-bottom:8px}
   .jog button{padding:13px 0;font-size:20px}
   .grid2 button{padding:11px 8px}
-  input,select{font-size:16px}  /* stops iOS zooming into inputs */
+  input,select,textarea{font-size:16px}  /* stops iOS zooming into inputs */
+  #scCode{font-size:14px}
   .io div{padding:9px 0;font-size:12px}
   .mono{font-size:13px}
 }
@@ -152,7 +158,7 @@ td:first-child,th:first-child{text-align:left}
   </div>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
+    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="script">Script</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
   </nav>
 
   <!-- LEFT -->
@@ -275,6 +281,23 @@ td:first-child,th:first-child{text-align:left}
         <span id="cycles"></span>
       </div>
       <div id="wps" style="color:var(--mute)">No waypoints yet.</div>
+      <div class="row" style="margin-top:6px">
+        <button id="wpExport">Export</button><button id="wpImport">Import</button><button id="wpToScript">→ Script</button><button id="wpClear">Clear</button>
+        <input type="file" id="wpFile" accept=".json,application/json" style="display:none">
+      </div>
+      <div class="note">J = joint move (curved path), L = straight line. Tap to switch.</div>
+    </div>
+    <div class="card" data-tab="script" id="scriptCard">
+      <div class="row" style="justify-content:space-between">
+        <h2>Script</h2>
+        <div class="row"><select id="scExample"><option value="">Examples…</option></select>
+          <button id="scRun" class="primary">Run</button><button id="scStop" class="danger">Stop</button></div>
+      </div>
+      <textarea id="scCode" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+      <div class="row" style="margin-top:6px"><button id="scSave">Save file</button><button id="scOpen">Open file</button><button id="scHelp">Commands</button>
+        <input type="file" id="scFile" accept=".js,.txt,text/javascript,text/plain" style="display:none"></div>
+      <div class="log mono" id="scOut"></div>
+      <div class="note" id="scDoc" style="display:none;white-space:pre-wrap"></div>
     </div>
     <div class="card" data-tab="points" id="progCard">
       <h2>Programs on the cobot</h2>
