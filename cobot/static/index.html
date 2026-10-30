@@ -105,6 +105,21 @@ td:first-child,th:first-child{text-align:left}
 #pin .card{width:min(320px,90vw);text-align:center}
 #pin input{width:100%;font-size:22px;text-align:center;letter-spacing:.3em;margin:10px 0}
 
+/* ---------- display page (/display): full-screen 3D + status, no controls ---------- */
+body.display header,body.display .tabs,body.display .side,body.display .help,body.display #targetBar{display:none!important}
+body.display .view{position:fixed;inset:0;height:auto!important;min-height:0}
+body.display .hud{font-size:15px;top:calc(14px + var(--safe-t));left:18px}
+.dispbar{display:none}
+body.display .dispbar{display:flex;position:absolute;left:0;right:0;bottom:0;align-items:center;gap:22px;flex-wrap:wrap;
+  padding:12px 20px calc(12px + var(--safe-b));background:rgba(29,30,32,.9);border-top:2px solid var(--accent);font-size:16px}
+.dispbar img{height:26px}
+.dispbar .grp{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.dispbar .light{font-size:15px}
+.dispbar .v{color:var(--mute)} .dispbar .v b{color:var(--text);font-family:ui-monospace,Consolas,monospace;font-weight:600}
+.dispbar .tag{margin-left:auto;color:var(--mute);font-size:13px}
+body.display .dispbanner{position:absolute;top:calc(14px + var(--safe-t));right:18px;padding:8px 14px;border-radius:8px;font-weight:700;font-size:18px;display:none}
+body.display .dispbanner.show{display:block}
+
 /* ---------- phones & tablets ---------- */
 @media (max-width:900px), (pointer:coarse) and (max-width:1400px){
   body{font-size:15px}
@@ -157,6 +172,8 @@ td:first-child,th:first-child{text-align:left}
       <button id="tJnt">Move joint</button>
       <button id="tCancel">Cancel</button>
     </div>
+    <div class="dispbanner" id="dispBanner"></div>
+    <div class="dispbar" id="dispBar"></div>
     <div class="help">Drag the orange TCP ball to set a target · Shift+drag = up/down<br>Drag empty space = orbit · Right-drag = pan · Wheel = zoom</div>
   </div>
 

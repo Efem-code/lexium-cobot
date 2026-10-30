@@ -70,7 +70,8 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _static(self, path):
-        rel = "index.html" if path in ("", "/") else path.lstrip("/")
+        # /display = the same page in watch-only mode (app.js reads the path)
+        rel = "index.html" if path in ("", "/", "/display") else path.lstrip("/")
         full = os.path.normpath(os.path.join(STATIC, rel))
         if not full.startswith(os.path.normpath(STATIC) + os.sep) or not os.path.isfile(full):
             return False
@@ -100,6 +101,12 @@ class Handler(BaseHTTPRequestHandler):
         d = self.driver
         path = self.path.split("?", 1)[0]
         if not path.startswith("/api/"):
+            if path == "/display/":   # keep relative asset URLs working
+                self.send_response(301)
+                self.send_header("Location", "/display")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if self._static(path):
                 return
             return self._send(404, "not found", "text/plain")

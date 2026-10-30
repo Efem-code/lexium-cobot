@@ -5,6 +5,11 @@
 const $ = id => document.getElementById(id);
 const DEMO = new URLSearchParams(location.search).has("demo") || location.hostname.endsWith("github.io") || location.protocol === "file:";
 if (DEMO) document.body.classList.add("demo");
+// display page (/display or ?display): watch only, for TVs and shared screens
+const DISPLAY = /\/display\/?$/.test(location.pathname) || new URLSearchParams(location.search).has("display");
+if (DISPLAY) document.body.classList.add("display");
+const viewAllowed = (path, body) => body === undefined || ["/api/fk", "/api/ik"].includes(path) ||
+  (path === "/api/cmd" && /^(get_|kine_)/.test(body.cmdName || ""));
 
 let S = {};                 // latest status
 let profiles = {}, limits = [], HOME = [];
@@ -34,6 +39,8 @@ const HttpTransport = {
 const T = DEMO ? new CobotSim.LocalTransport() : HttpTransport;
 
 async function api(path, body) {
+  // the display page only ever reads: every command that could change or move the cobot is dropped here
+  if (DISPLAY && !viewAllowed(path, body)) return {errorCode: "view", errorMsg: "view-only display"};
   let j;
   try { j = await T.call(DEMO ? path : path.replace(/^\//, ""), body); }
   catch (e) { toast("Bridge not reachable: " + e.message); return {errorCode: "net", errorMsg: e.message}; }
@@ -729,6 +736,29 @@ function render() {
   for (const sel of ["model", "modelDemo"])
     if (S.model && $(sel).value !== S.model && document.activeElement !== $(sel)) $(sel).value = S.model;
   if (S.model && S.model !== fittedModel && profiles[S.model]) fitCamera(profiles[S.model].reach);
+  if (DISPLAY) renderDisplay();
+}
+let dispHtml = "";
+function renderDisplay() {
+  const L = (n, v, c) => `<span class="light"><span class="dot ${v ? c : ""}"></span>${n}</span>`;
+  const f = (v, d) => v == null ? "—" : (+v).toFixed(d);
+  const live = S.connected && !S.bridge_down && S.joints;
+  const spd = S.mode === "real" && S.speed_override != null ? S.speed_override : S.speed_ratio;
+  const prog = P.loaded ? `Program <b>${P.loaded}</b> · ${P.state || "—"}${P.state === "running" || P.state === "paused" ? ` · line <b>${P.line ?? "—"}</b>` : ""}` : "";
+  const html = `<img src="guillevin-logo.png" alt="Guillevin">
+    <span class="pill ${S.connected ? "ok" : "bad"}">${S.mode === "real" ? "REAL COBOT" : S.mode === "demo" ? "DEMO" : S.mode === "sim" ? "SIMULATOR" : "OFFLINE"}</span>
+    <span class="grp">${L("Power", S.powered, "on")}${L("Enabled", S.enabled, "on")}${L("Moving", S.inpos === false, "amber")}${L("E-stop", S.estop, "red")}${L("Prot. stop", S.protective_stop, "red")}</span>
+    ${live ? `<span class="v">J ${S.joints.map(v => `<b>${f(v, 1)}°</b>`).join(" ")}</span>
+    <span class="v">X <b>${f(S.tcp[0], 0)}</b> Y <b>${f(S.tcp[1], 0)}</b> Z <b>${f(S.tcp[2], 0)}</b> mm</span>
+    <span class="v">Speed <b>${spd == null ? "—" : Math.round(spd) + "%"}</b></span>` : ""}
+    ${prog ? `<span class="v">${prog}</span>` : ""}
+    <span class="tag">view only</span>`;
+  if (html !== dispHtml) { $("dispBar").innerHTML = dispHtml = html; }
+  // big banner for the things people across the room need to see
+  const fault = S.estop ? "E-STOP" : S.protective_stop ? "PROTECTIVE STOP" : S.errcode ? `ERROR ${S.errcode}${S.errmsg ? ": " + S.errmsg : ""}` : "";
+  const b = $("dispBanner");
+  b.textContent = fault; b.classList.toggle("show", !!fault);
+  b.style.background = fault ? "var(--bad)" : "";
 }
 
 // ------------------------------------------------------------ 3D view (canvas, no libraries)
@@ -1011,7 +1041,7 @@ cv.addEventListener("pointerdown", e => {
   }
   const hit = e.pointerType === "touch" ? 30 : 16;
   const near = P => P && Math.hypot(P[0] - x, P[1] - y) < hit;
-  if (e.button === 0 && (near(targetScreen) || near(tcpScreen)) && S.tcp) {
+  if (!DISPLAY && e.button === 0 && (near(targetScreen) || near(tcpScreen)) && S.tcp) {
     const base = target ? target.pose : S.tcp.slice();
     drag = {kind: "tcp"};
     if (!target) target = {pose: base.slice(), ok: true};
