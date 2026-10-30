@@ -60,8 +60,13 @@ class Handler(BaseHTTPRequestHandler):
     failures = {}                       # ip -> (count, last_time) for login throttling
     protocol_version = "HTTP/1.1"
 
+    share = None                        # set by cli: share("status"|"on"|"off") -> dict
+
+    def _local(self):
+        return self.client_address[0] in ("127.0.0.1", "::1")
+
     def _authed(self):
-        if not self.pin or self.client_address[0] in ("127.0.0.1", "::1"):
+        if not self.pin or self._local():
             return True  # the PC itself never needs the PIN
         for part in (self.headers.get("Cookie") or "").split(";"):
             k, _, v = part.strip().partition("=")
@@ -115,6 +120,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return self._json({"error": "PIN required"}, 401)
         self.path = path
+        if self.path == "/api/share":
+            return self._json(dict(self.share("status") if self.share else {"on": False, "available": False},
+                                   local=self._local()))
         if self.path == "/api/state":
             return self._json(d.status())
         if self.path == "/api/models":
@@ -165,6 +173,13 @@ class Handler(BaseHTTPRequestHandler):
             elif p == "/api/cmd":
                 name = body.pop("cmdName")
                 r = d.command(name, **body)
+            elif p == "/api/share":
+                # only someone at the PC itself may open (or close) the app to the network
+                if not self._local():
+                    return self._json({"errorCode": "403", "errorMsg": "Sharing can only be changed on the PC running the app"})
+                if not self.share:
+                    return self._json({"errorCode": "404", "errorMsg": "Restart the app with --lan to share it"})
+                r = self.share("on" if body.get("on") else "off")
             elif p == "/api/limits":
                 r = {"limits": d.set_limits(**body)}
             elif p == "/api/jog":

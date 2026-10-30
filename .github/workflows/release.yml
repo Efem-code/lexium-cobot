@@ -37,4 +37,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/LexiumCobot.exe \
             --title "Lexium Cobot $GITHUB_REF_NAME" \
-            --notes "Download **LexiumCobot.exe** and double-click it: the simulator and controller page open in your browser. No Python needed. Windows may warn that the app is from an unknown publisher (it isn't code-signed): More info > Run anyway. See the README for connecting to the real cobot, the iPad bridge and the Python SDK."
+            --notes "Download **LexiumCobot.exe** and double-click it: the simulator and controller page open in your browser. No Python, no install. Windows may warn that the app is from an unknown publisher (it isn't code-signed): More info > Run anyway. Real cobot: join its Wi-Fi, then Setup > Real cobot > Connect. Phones, tablets and TVs: Setup > Share with phones & TVs (TVs open the /display address). See the README for the iPad bridge and the Python SDK."

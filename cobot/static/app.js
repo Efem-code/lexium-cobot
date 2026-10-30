@@ -345,6 +345,26 @@ function showLimits() {
   for (const [id, k] of [["limZ", "z_min"], ["limJ", "joint_speed_max"], ["limL", "linear_speed_max"]])
     if (L[k] != null && document.activeElement !== $(id)) $(id).value = L[k];
 }
+// ------------------------------------------------------------ share with phones & TVs (bridge only)
+function showShare(s) {
+  if (!s || !s.available) { $("shareBtn").disabled = true; $("shareState").textContent = "start the app with --lan to share"; return; }
+  $("shareBtn").textContent = s.on ? "Stop sharing" : "Share with phones & TVs";
+  $("shareBtn").disabled = !s.local || !!s.fixed;
+  $("shareState").textContent = s.on ? "on" : "off";
+  const urls = (s.addresses || []).map(ip => `http://${ip}:${s.port}`);
+  $("shareInfo").innerHTML = !s.on ? "Lets other devices on the same network open this page (PIN protected). Windows may ask to allow the app through the firewall: choose Allow."
+    : `PIN <b style="color:var(--text);font-size:15px">${s.pin}</b><br>` +
+      urls.map(u => `Controller: <a href="${u}" target="_blank">${u}</a> · TV / display: <a href="${u}/display" target="_blank">${u}/display</a>`).join("<br>") +
+      (s.local ? "" : "<br>Change sharing on the PC running the app.");
+}
+async function loadShare() { if (!DEMO) showShare(await api("/api/share").catch(() => null)); }
+$("shareBtn").onclick = async () => {
+  const on = $("shareBtn").textContent.startsWith("Share");
+  const r = await api("/api/share", {on});
+  if (r && r.available) showShare({...r, local: true});
+};
+loadShare();
+
 $("limSet").onclick = guard(async () => {
   const body = {z_min: numOf("limZ"), joint_speed_max: numOf("limJ"), linear_speed_max: numOf("limL")};
   if (body.joint_speed_max <= 0 || body.linear_speed_max <= 0) throw new Error("Speed limits must be above 0");

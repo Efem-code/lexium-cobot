@@ -30,7 +30,7 @@ All of them start the simulator and open the controller page at http://127.0.0.1
 |---|---|
 | `lexium-cobot` (or `python run.py`) | simulator + page, auto-connected |
 | `lexium-cobot ui` | page only: connect to the real cobot from **Setup** |
-| `lexium-cobot --lan` | also serve the page to phones/iPads on the same Wi-Fi (PIN protected) |
+| `lexium-cobot --lan` | also serve the page to phones/iPads on the same Wi-Fi (PIN protected); or click **Setup → Share with phones & TVs** in the page |
 | `lexium-cobot sim --public` | simulator only, on the LAN (for a TM262 or another PC) |
 | `lexium-cobot --model LXMRL12` | arm model: `LXMRL03` (default), `LXMRL07`, `LXMRL12`, `LXMRL18` |
 
@@ -57,6 +57,8 @@ Details and everything verified on the real controller: [docs/REAL_HARDWARE.md](
 | **Setup** | connect (simulator or real cobot); **payload**; **tool (TCP) slots**, active tool and **4-point tool calibration**; **user frames**; **bridge limits** (floor height, max joint and linear speed); collision sensitivity (view only). Every setting change is read back from the cobot to confirm it took. |
 
 **STOP** (header) or **Esc** stops all motion and any running program.
+
+**TVs and shared screens:** open `http://<PC address>:8765/display` (the addresses and PIN are listed under **Setup → Phones, tablets & TVs** once sharing is on). It shows the arm full screen with status and a large E-stop / fault banner, and sends no commands: touching it can only rotate and zoom the view.
 
 ## Program it
 

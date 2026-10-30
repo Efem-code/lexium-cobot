@@ -16,7 +16,9 @@ import secrets
 import socket
 import threading
 import time
+import urllib.request
 import webbrowser
+from http.server import ThreadingHTTPServer
 
 from . import __version__, settings
 from .driver import CobotDriver
@@ -62,6 +64,53 @@ def lan_addresses():
     return sorted(ip for ip in ips if not ip.startswith("127."))
 
 
+class Sharing:
+    """'Share with phones & TVs' from the page: a second listener on all interfaces, PIN protected.
+    Started on demand so Windows only asks about the firewall when someone actually shares."""
+
+    def __init__(self, port, already_lan):
+        self.port, self.lan, self.httpd = port, already_lan, None
+
+    def __call__(self, action):
+        if action == "on" and not self.on:
+            cfg = bridge_settings(None)
+            Handler.pin, Handler.token = cfg["pin"], cfg["token"]
+            try:
+                self.httpd = ThreadingHTTPServer(("0.0.0.0", self.port), Handler)
+            except OSError as e:
+                return {"errorCode": "500", "errorMsg": f"Couldn't open port {self.port} to the network ({e})"}
+            self.httpd.daemon_threads = True
+            threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+            settings.update("share", True)
+            print(f"[ui] shared with phones/TVs: PIN {cfg['pin']}")
+        elif action == "off" and self.httpd:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+            self.httpd = None
+            settings.update("share", False)
+            print("[ui] sharing off")
+        return self.status()
+
+    @property
+    def on(self):
+        return self.lan or self.httpd is not None
+
+    def status(self):
+        st = {"on": self.on, "available": True, "fixed": self.lan, "port": self.port}
+        if self.on:
+            st.update(pin=Handler.pin, addresses=lan_addresses())
+        return st
+
+
+def already_running(port):
+    """True when this app already answers on the port (a second double-click on the exe)."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/auth", timeout=1.5) as r:
+            return "need_pin" in json.loads(r.read() or b"{}")
+    except (OSError, ValueError):
+        return False
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="lexium-cobot", description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
@@ -79,6 +128,12 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     print(f"Lexium Cobot {__version__}  (settings: {settings.path()})")
+    if a.what in ("all", "ui") and already_running(a.ui_port):
+        url = f"http://127.0.0.1:{a.ui_port}"
+        print(f"Already running: opening {url}")
+        if not a.no_browser:
+            webbrowser.open(url)
+        return
     if a.what in ("all", "sim"):
         host = "0.0.0.0" if a.public else "127.0.0.1"
         try:
@@ -105,6 +160,9 @@ def main(argv=None):
                              f"Use the open window, or start with --ui-port 8766")
         url = f"http://127.0.0.1:{a.ui_port}"
         print(f"[ui] controller UI at {url}")
+        Handler.share = Sharing(a.ui_port, a.lan)
+        if not a.lan and settings.load().get("share"):
+            Handler.share("on")   # shared last time: keep phones and TVs working after a restart
         if a.lan:
             print("\n  Phones / iPads on the same Wi-Fi: open one of these, then Share > Add to Home Screen")
             for ip in lan_addresses():
