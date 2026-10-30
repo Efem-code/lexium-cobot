@@ -237,14 +237,21 @@ class CobotDriver:
                     self.mb_ok = False
                     self.state = {}
                     # Modbus is optional when the status stream already gives us the state
-                    if not self.stream_ok:
+                    if not self.stream_ok and not self.last_error.startswith("status stream"):
                         self.last_error = f"Modbus: {e}"
-                time.sleep(5.0 if self.stream_ok else 1.0)
+                # real controllers usually have Modbus off: don't keep knocking on it
+                time.sleep(1.0 if self.mode == "sim" else 10.0)
 
     def _poll_stream(self, gen):
+        # The real controller has few stream slots and is slow to free them: always close the
+        # socket, tolerate Wi-Fi hiccups (8 s read timeout) and back off between reconnects,
+        # or repeated reconnects fill the slots and it stops accepting connections at all.
+        backoff = 1.0
         while gen == self._gen:
+            s = None
             try:
-                s = open_socket(self.host, self.ports["status"], 2, self.tls)
+                s = open_socket(self.host, self.ports["status"], 4, self.tls)
+                s.settimeout(8)
                 js = JsonStream()
                 last_hist = 0.0
                 while gen == self._gen:
@@ -253,21 +260,33 @@ class CobotDriver:
                         break
                     msgs = js.feed(data)
                     if msgs:
+                        backoff = 1.0
                         with self.lock:
                             self.extra = msgs[-1]
                             self.stream_ok = True
-                            if self.last_error.startswith("Modbus"):
+                            if self.last_error.startswith(("Modbus", "status stream")):
                                 self.last_error = ""  # stream covers the state; Modbus is optional
                             j = self.extra.get("joint_position")
                             if not self.mb_ok and j and time.time() - last_hist > 0.05:
                                 last_hist = time.time()
                                 self.history.append((last_hist, j))
                                 del self.history[:-600]
-                s.close()
-            except Exception:
+            except Exception as e:
+                with self.lock:
+                    if gen == self._gen:
+                        self.last_error = f"status stream (port {self.ports['status']}): {e or type(e).__name__}"
+            finally:
+                if s:
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
                 with self.lock:
                     self.stream_ok = False
-                time.sleep(2.0)
+            if gen != self._gen:
+                return
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 15.0)
 
     def _jog_watchdog(self, gen):
         while gen == self._gen:

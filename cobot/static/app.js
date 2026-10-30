@@ -251,7 +251,13 @@ async function playWps() {
       if (r.errorCode !== "0") { playing = false; break; }
       if (w.grip) continue;   // its own wait already ran; the pause is between moves
       await sleep(250);
-      while (playing && S.inpos === false) await sleep(50);
+      // the real cobot's "in position" comes from its status stream: if that drops, stop rather than wait forever
+      let lost = 0;
+      while (playing && S.inpos === false) {
+        lost = S.mode === "real" && !S.stream_ok ? lost + 50 : 0;
+        if (lost > 3000) { playing = false; api("/api/stop", {}); toast("Play stopped: lost the status feed from the cobot"); break; }
+        await sleep(50);
+      }
       // stop the loop on any fault (e-stop, protective stop, disabled)
       if (S.estop || S.protective_stop || S.enabled === false) { playing = false; toast("Play stopped: robot not ready"); break; }
       const dwell = Math.max(0, +$("dwell").value || 0);
@@ -887,8 +893,10 @@ function draw() {
   if (S.points) lastPts = S.points;
   else if (!lastPts && !lastPtsAsked) { lastPtsAsked = true; api("/api/fk", {joints: [0, 90, -90, 90, 90, 0]}).then(r => { if (r.points && !lastPts) lastPts = r.points; }).catch(() => { lastPtsAsked = false; }); }
   drawArm(S.points || lastPts, S.points ? 1 : .3, false, !!S.points);
-  if (!S.points) {
-    const msg = S.bridge_down ? "Bridge not reachable: is the app still running on the PC?"
+  const feedLost = S.mode === "real" && S.connected && !S.stream_ok && !S.modbus_ok;
+  if (!S.points || feedLost) {
+    const msg = feedLost && S.points ? "Status feed from the cobot lost: reconnecting… (the arm shown may be out of date)"
+      : S.bridge_down ? "Bridge not reachable: is the app still running on the PC?"
       : S.mode === "real" ? `No data from the cobot${S.host ? " at " + S.host : ""}: check the PC is on the cobot Wi-Fi`
       : S.connected ? "Waiting for data…" : "Not connected: Setup → Connect";
     ctx.font = "600 14px system-ui, sans-serif"; ctx.textAlign = "center";
