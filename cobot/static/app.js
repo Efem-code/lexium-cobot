@@ -773,23 +773,81 @@ function cyl(p0, p1, r, paint, capAt) {
     return {P, R, rMinor: Math.max(R * k, 0.5)};
   });
   const nx = -Math.sin(ang), ny = Math.cos(ang), R0 = ends[0].R, R1 = ends[1].R;
+  // Lit like a painted metal tube: sample the surface normal across the silhouette (t = -1..1),
+  // diffuse + Blinn highlight from LIGHT, so the bright stripe sits on the side facing the light.
+  const midp = mul(add(p0, p1), .5), toEye = norm(sub(B.eye, midp));
+  let s3 = cross(ax, toEye); s3 = Math.hypot(...s3) > 1e-6 ? norm(s3) : B.r;
+  const front = norm(sub(toEye, mul(ax, dot(toEye, ax))));
+  const Sp = proj(add(p0, s3)), flip = Sp && ((Sp[0] - A[0]) * nx + (Sp[1] - A[1]) * ny) < 0 ? -1 : 1;
+  const base = hexRgb(paint[1]), H = norm(add(KEY, toEye));
   const g = ctx.createLinearGradient(A[0] - nx * R0, A[1] - ny * R0, A[0] + nx * R0, A[1] + ny * R0);
-  g.addColorStop(0, paint[0]); g.addColorStop(.45, paint[1]); g.addColorStop(1, paint[2]);
+  for (let k = 0; k <= 10; k++) {
+    const t = (k / 5 - 1) * flip, N = add(mul(s3, t), mul(front, Math.sqrt(Math.max(0, 1 - t * t))));
+    g.addColorStop(k / 10, shade(base, N, H));
+  }
   ctx.fillStyle = g; ctx.beginPath();
   ctx.moveTo(A[0] + nx * R0, A[1] + ny * R0); ctx.lineTo(Bq[0] + nx * R1, Bq[1] + ny * R1);
   ctx.lineTo(Bq[0] - nx * R1, Bq[1] - ny * R1); ctx.lineTo(A[0] - nx * R0, A[1] - ny * R0); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,.28)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(A[0] + nx * R0, A[1] + ny * R0); ctx.lineTo(Bq[0] + nx * R1, Bq[1] + ny * R1);
+  ctx.moveTo(A[0] - nx * R0, A[1] - ny * R0); ctx.lineTo(Bq[0] - nx * R1, Bq[1] - ny * R1); ctx.stroke();
   // draw the end facing the camera last so it sits on top
   const facing = dot(ax, B.f) > 0 ? 0 : 1;
   for (const e of [1 - facing, facing]) {
-    const {P, R, rMinor} = ends[e];
-    ctx.fillStyle = e === capAt && paint !== PAINT.ghost ? PAINT.cap[1] : paint[e === facing ? 1 : 2];
+    const {P, R, rMinor} = ends[e], n = mul(ax, e ? 1 : -1);
+    const isCap = e === capAt && paint !== PAINT.ghost, col = isCap ? hexRgb(PAINT.cap[1]) : base;
+    ctx.fillStyle = shade(col, n, H, e === facing ? 1 : .8);
     ctx.beginPath(); ctx.ellipse(P[0], P[1], rMinor, R, ang, 0, 7); ctx.fill();
-    if (e === capAt && e === facing && paint !== PAINT.ghost) { ctx.fillStyle = PAINT.cap[2]; ctx.beginPath(); ctx.ellipse(P[0], P[1], rMinor * .25, R * .25, ang, 0, 7); ctx.fill(); }
+    if (e !== facing) continue;
+    ctx.strokeStyle = "rgba(0,0,0,.3)"; ctx.stroke();
+    if (isCap) {   // the real arm's silver caps have a recessed centre ring
+      ctx.strokeStyle = "rgba(0,0,0,.22)"; ctx.lineWidth = Math.max(1, R * .06);
+      ctx.beginPath(); ctx.ellipse(P[0], P[1], rMinor * .62, R * .62, ang, 0, 7); ctx.stroke();
+      ctx.fillStyle = shade(hexRgb(PAINT.cap[2]), n, H); ctx.beginPath(); ctx.ellipse(P[0], P[1], rMinor * .22, R * .22, ang, 0, 7); ctx.fill();
+      ctx.lineWidth = 1;
+    }
   }
+}
+const LIGHT = norm([.35, -.5, .8]);   // casts the table shadow
+let KEY = LIGHT;                         // shading light: follows the camera (upper left, in front) so the arm always reads well
+const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+// ambient + diffuse + specular on an [r,g,b] paint colour; returns a CSS colour
+function shade(rgb, N, H, dim = 1) {
+  const d = Math.max(0, dot(N, KEY)), sp = Math.pow(Math.max(0, dot(N, H)), 40) * .5;
+  const k = (.45 + .65 * d) * dim;
+  return `rgb(${rgb.map(c => Math.min(255, Math.round(c * k + 255 * sp))).join(",")})`;
 }
 // pts = [base, J2, J3, J3 after side step, J4, J5, flange, tcp] (see kinematics.joint_points)
 function drawArm(pts, alpha, ghostMode, withGripper) {
   if (!pts || pts.length !== 8) return;
+  const {parts, fl} = armParts(pts, ghostMode, withGripper);
+  parts.sort((a, b) => { const pa = proj(mul(add(a[0], a[1]), .5)), pb = proj(mul(add(b[0], b[1]), .5)); return (pb ? pb[2] : 0) - (pa ? pa[2] : 0); });
+  ctx.globalAlpha = alpha;
+  for (const [p0, p1, r, paint, capAt] of parts) cyl(p0, p1, r, paint, capAt);
+  ctx.globalAlpha = 1;
+  if (withGripper && showGripper()) drawGripper(fl, alpha);
+}
+// soft shadow of the arm (and gripper) on the table, cast along LIGHT
+const shCv = document.createElement("canvas"), shCtx = shCv.getContext("2d");
+function drawShadow(pts, zt, withGripper) {
+  if (!pts || pts.length !== 8) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (shCv.width !== cv.width || shCv.height !== cv.height) { shCv.width = cv.width; shCv.height = cv.height; }
+  shCtx.setTransform(dpr, 0, 0, dpr, 0, 0); shCtx.clearRect(0, 0, W, H);
+  const onTable = p => sub(p, mul(LIGHT, (p[2] - zt) / LIGHT[2]));
+  const {parts, fl} = armParts(pts, false, withGripper);
+  if (withGripper && showGripper()) { const G = GRIPPERS[GRIP.model]; parts.push([fl, add(fl, mul(norm(sub(fl, pts[5])), G.length)), G.body[0] / 2]); }
+  shCtx.strokeStyle = "#000"; shCtx.lineCap = "round";
+  try { shCtx.filter = "blur(5px)"; } catch (_) {}
+  for (const [p0, p1, r] of parts) {
+    const a = proj(onTable(p0)), b = proj(onTable(p1)); if (!a || !b) continue;
+    shCtx.lineWidth = 2 * r * F / ((a[2] + b[2]) / 2);
+    shCtx.beginPath(); shCtx.moveTo(a[0], a[1]); shCtx.lineTo(b[0], b[1]); shCtx.stroke();
+  }
+  shCtx.filter = "none";
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = .26; ctx.drawImage(shCv, 0, 0); ctx.restore();
+}
+function armParts(pts, ghostMode, withGripper) {
   const [base, sh, el, st, w1, w2, fl, tcp] = pts;
   const s = Math.min(1.8, Math.max(1, ((profiles[S.model] && profiles[S.model].reach) || 626) / 626));
   const at = (p, dir, d) => add(p, mul(dir, d * s));
@@ -810,11 +868,8 @@ function drawArm(pts, alpha, ghostMode, withGripper) {
     [w2, at(fl, z6, -14), 34, green], [at(fl, z6, -14), fl, 31, silver, 1], // J6 + flange
   ];
   if (len(sub(tcp, fl)) > 1 && !(withGripper && showGripper())) parts.push([fl, tcp, 10, grey]);
-  parts.sort((a, b) => { const pa = proj(mul(add(a[0], a[1]), .5)), pb = proj(mul(add(b[0], b[1]), .5)); return (pb ? pb[2] : 0) - (pa ? pa[2] : 0); });
-  ctx.globalAlpha = alpha;
-  for (const [p0, p1, r, paint, capAt] of parts) cyl(p0, p1, r * s, paint, capAt);
-  ctx.globalAlpha = 1;
-  if (withGripper && showGripper()) drawGripper(fl, alpha);
+  for (const p of parts) p[2] *= s;
+  return {parts, fl};
 }
 // ------------------------------------------------------------ gripper model (simulator only)
 // SCHUNK Co-act EGP-C 40-N-N-FCR7 (ID 1326456): 93.8 x 90.2 x 120.5 mm, 6 mm stroke per jaw, 0.2 s open/close.
@@ -874,20 +929,38 @@ function drawFrame(p, R, len, alpha) {
   for (let k = 0; k < 3; k++) { ctx.globalAlpha = alpha; line(p, add(p, [R[0][k] * len, R[1][k] * len, R[2][k] * len]), cols[k], 2); }
   ctx.globalAlpha = 1;
 }
-let tcpScreen = null, targetScreen = null, lastPts = null, lastPtsAsked = false;
+let tcpScreen = null, targetScreen = null, lastPts = null, lastPtsAsked = false, viewDrop = 0;
+try { viewDrop = Math.max(0, +localStorage.getItem("viewDrop") || 0); } catch (_) {}
+$("viewDrop").value = viewDrop || "";
+$("viewDrop").onchange = e => { viewDrop = Math.max(0, Math.min(2000, +e.target.value || 0)); e.target.value = viewDrop || ""; try { localStorage.setItem("viewDrop", viewDrop); } catch (_) {} };
 function draw() {
   const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
   if (cv.width !== Math.round(rect.width * dpr) || cv.height !== Math.round(rect.height * dpr)) { cv.width = Math.round(rect.width * dpr); cv.height = Math.round(rect.height * dpr); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); W = rect.width; H = rect.height; F = Math.min(H * 1.25, W * 1.6); B = camBasis();
+  KEY = norm(add(add(mul(B.u, .6), mul(B.r, -.45)), mul(B.f, -.7)));
   ctx.clearRect(0, 0, W, H);
   const reach = (profiles[S.model] && profiles[S.model].reach) || 900, ext = Math.ceil(reach * 1.6 / 100) * 100;
-  for (let v = -ext; v <= ext; v += 100) { const c = v === 0 ? "#4a4c51" : "#26282b"; line([v, -ext, 0], [v, ext, 0], c, 1); line([-ext, v, 0], [ext, v, 0], c, 1); }
-  ctx.strokeStyle = "rgba(232,100,42,.25)"; ctx.setLineDash([6, 6]); ctx.beginPath();
-  for (let a = 0; a <= 64; a++) { const P = proj([reach * Math.cos(a / 64 * 6.283), reach * Math.sin(a / 64 * 6.283), 0]); if (P) a ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1]); }
-  ctx.stroke(); ctx.setLineDash([]);
+  const zt = -viewDrop;   // table surface (the arm's base is at Z 0)
+  const ring = (r, z, n = 48) => { const P = []; for (let a = 0; a <= n; a++) { const q = proj([r * Math.cos(a / n * 6.283), r * Math.sin(a / n * 6.283), z]); if (q) P.push(q); } return P; };
+  const poly = P => { ctx.beginPath(); P.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); };
+  // table: a soft lit disc under the grid, fading out at the edge
+  const tc = proj([0, 0, zt]), te = proj([ext, 0, zt]);
+  if (tc && te) {
+    const g = ctx.createRadialGradient(tc[0], tc[1], 0, tc[0], tc[1], Math.hypot(te[0] - tc[0], te[1] - tc[1]) * 1.2);
+    g.addColorStop(0, "rgba(70,72,78,.55)"); g.addColorStop(1, "rgba(70,72,78,0)");
+    ctx.fillStyle = g; poly(ring(ext, zt, 64)); ctx.fill();
+  }
+  for (let v = -ext; v <= ext; v += 100) { const c = v === 0 ? "#4a4c51" : "#2a2c30"; line([v, -ext, zt], [v, ext, zt], c, 1); line([-ext, v, zt], [ext, v, zt], c, 1); }
+  ctx.strokeStyle = "rgba(232,100,42,.3)"; ctx.setLineDash([6, 6]); poly(ring(reach, zt, 64)); ctx.stroke(); ctx.setLineDash([]);
+  const live = S.points || lastPts;
+  drawShadow(live, zt, !!S.points);
+  // mounting plate (when the base sits above the table), then the base footprint
+  if (viewDrop > 0) {
+    const R = 105, top = ring(R, 0), bot = ring(R, zt);
+    ctx.fillStyle = "#3a3d42"; poly(bot.concat(top.slice().reverse())); ctx.fill();
+    ctx.fillStyle = "#4b4f55"; poly(top); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.stroke();
+  } else { ctx.fillStyle = "#2e3034"; poly(ring(95, 0, 32)); ctx.fill(); }
   drawFrame([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 200, .9);
-  const bp = []; for (let a = 0; a <= 32; a++) { const P = proj([95 * Math.cos(a / 32 * 6.283), 95 * Math.sin(a / 32 * 6.283), 0]); if (P) bp.push(P); }
-  ctx.fillStyle = "#2e3034"; ctx.beginPath(); bp.forEach((P, i) => i ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1])); ctx.fill();
   if (ghost) drawArm(ghost.points, .35, true);
   // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
   if (S.points) lastPts = S.points;
