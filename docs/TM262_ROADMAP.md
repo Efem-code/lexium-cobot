@@ -6,6 +6,15 @@ The goal is for the TM262 to become the motion master, while this PC app becomes
 - **LexiumCobotCommunication v1.0.1.0** needs Machine Expert **V2.2**, TM262 firmware **V5.2.8.9 or later**, and Lexium Cobot Controller **V1.7.0_51_SE or later**. Check all three on your hardware before buying or upgrading anything.
 - The library works with all TM262 models: Motion M05, M15, M25, M35 and Logic L01, L10, L20.
 
+## Found on this PC (2026-10-31)
+- Machine Expert **V2.2** and **V2.3** are installed, with **LexiumCobotCommunication 1.0.3.0** (V2.2) and **1.1.0.0** (V2.3).
+- `LCC.FB_CobotController` has the methods `Connect` / `ConnectTLS`, `PowerOn`, `EnableRobot`, `ClearFault`, `MoveJ`, `MoveL`, `MoveC`, `MoveTCP`, `JogStart`/`JogStop`, `SetDigitalOutput`, `SetSpeedOverride`, `StopRobotMovement`, `LoadProgram`/`StartProgram`, plus kinematics and trajectory recording. `LCC.FB_CobotControllerFeedback` reads the status stream.
+- Schneider's help says commands use port **10001** and feedback port **10000**: the same JAKA JSON ports this app and its simulator use. So a TM262 can be pointed at the PC simulator (`lexium-cobot sim --public`, plain `Connect`) and later at the real cobot (`ConnectTLS`, since the real controller only speaks TLS).
+- Caution: the real controller ignored `set_rapidrate` from this app, so `SetSpeedOverride` may also do nothing. Give each `MoveL`/`MoveJ` its own slow speed until that's tested.
+
+## Drawing with the TM262 (G-code)
+The page's **Draw** tab plans the drawing, and **Export for TM262** writes it as Structured Text: a `ST_DrawPoint` DUT and a `GVL_Drawing` list with every point in the base frame, the pen orientation, the speeds, and the start and finish joints. The PLC program then only has to run: `MoveJ` start, then `MoveL` through `aPoints[1..DRAW_POINTS]`, then `MoveJ` finish, waiting for each command to be acknowledged and in position. That program will be written against the method inputs as shown in Machine Expert, then tested against the simulator before the real arm.
+
 ## Phase A: PLC talks to the simulator (no robot needed)
 1. On the PC:
    ```bash

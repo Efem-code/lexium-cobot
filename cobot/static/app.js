@@ -200,7 +200,7 @@ $("gSimTool").onclick = async () => {
               await cmd("set_tool_id", {tool_id: 1}),
               await cmd("set_payload", {mass: G.mass, centroid: [0, 0, G.com]})];
   readCfg().catch(() => {});
-  toast(rs.every(okR) ? `Simulator: tool 1 = ${G.name} jaw tips (Z ${G.length} mm), payload ${G.mass} kg` : "Simulator didn't accept: " + (rs.find(r => !okR(r)).errorMsg || "error"));
+  toast(rs.every(okR) ? `Simulator: tool 1 = ${G.name} ${G.pen ? "pen tip" : "jaw tips"} (Z ${G.length} mm), payload ${G.mass} kg` : "Simulator didn't accept: " + (rs.find(r => !okR(r)).errorMsg || "error"));
 };
 const setDo = (i, v) => cmd("set_digital_output", {type: 0, index: i, value: v ? 1 : 0});
 async function gripStep(close) {
@@ -926,7 +926,10 @@ function armParts(pts, ghostMode, withGripper) {
 // Body and jaw shapes are simplified boxes; the outer dimensions and stroke follow the datasheet.
 const GRIPPERS = {
   egpc40: {name: "SCHUNK Co-act EGP-C 40", mass: 0.66, com: 45, length: 120.5, body: [93.8, 90.2, 88], jaw: [18, 26, 32.5], stroke: 6, closedGap: 6, time: 0.2},
+  // generic spring-loaded pen holder for the Draw tab: 30 mm body, pen tip 150 mm from the flange
+  pen: {name: "Pen holder", mass: 0.2, com: 50, length: 150, body: [30, 30, 105], pen: true},
 };
+PAINT.pen = ["#5d6168", "#33363b", "#1a1c1f"]; PAINT.ink = ["#5a6fd0", "#2c3f9c", "#16205a"];
 let jawOpen = 1, jawT = 0;   // 1 = fully open
 function jawTarget() {
   const d = S.dout || [], c = !!d[GRIP.close], o = GRIP.open >= 0 ? !!d[GRIP.open] : !c;
@@ -953,6 +956,16 @@ function box(c, ax, h, color, sidesOnly) {
 }
 function drawGripper(fl, alpha) {
   const G = GRIPPERS[GRIP.model]; if (!G || !S.tcp) return;
+  if (G.pen) {   // holder body, then the pen and its tip along the tool axis
+    const t = S.tool || [0, 0, 0, 0, 0, 0], Rf = matMul(rpyR(S.tcp[3], S.tcp[4], S.tcp[5]), matT(rpyR(t[3], t[4], t[5]))), ez = [Rf[0][2], Rf[1][2], Rf[2][2]];
+    const at = d => add(fl, mul(ez, d));
+    ctx.globalAlpha = alpha;
+    cyl(fl, at(G.body[2]), G.body[0] / 2, PAINT.pen, 1);
+    cyl(at(G.body[2]), at(G.length - 8), 5, PAINT.ink, 0);
+    cyl(at(G.length - 8), at(G.length), 2, PAINT.pen);
+    ctx.globalAlpha = 1;
+    return;
+  }
   // flange orientation = TCP orientation with the active tool's rotation taken out
   const t = S.tool || [0, 0, 0, 0, 0, 0], Rf = matMul(rpyR(S.tcp[3], S.tcp[4], S.tcp[5]), matT(rpyR(t[3], t[4], t[5])));
   const ex = [Rf[0][0], Rf[1][0], Rf[2][0]], ey = [Rf[0][1], Rf[1][1], Rf[2][1]], ez = [Rf[0][2], Rf[1][2], Rf[2][2]];
@@ -984,7 +997,9 @@ try { viewDrop = Math.max(0, +localStorage.getItem("viewDrop") || 0); } catch (_
 $("viewDrop").value = viewDrop || "";
 $("viewDrop").onchange = e => { viewDrop = Math.max(0, Math.min(2000, +e.target.value || 0)); e.target.value = viewDrop || ""; try { localStorage.setItem("viewDrop", viewDrop); } catch (_) {} };
 function draw() {
+  requestAnimationFrame(draw);   // first, so one bad frame can't stop the view for good
   const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;   // hidden or collapsed: nothing to draw yet
   if (cv.width !== Math.round(rect.width * dpr) || cv.height !== Math.round(rect.height * dpr)) { cv.width = Math.round(rect.width * dpr); cv.height = Math.round(rect.height * dpr); }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); W = rect.width; H = rect.height; F = Math.min(H * 1.25, W * 1.6); B = camBasis();
   KEY = norm(add(add(mul(B.u, .6), mul(B.r, -.45)), mul(B.f, -.7)));
@@ -1011,6 +1026,7 @@ function draw() {
     ctx.fillStyle = "#4b4f55"; poly(top); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.stroke();
   } else { ctx.fillStyle = "#2e3034"; poly(ring(95, 0, 32)); ctx.fill(); }
   drawFrame([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 200, .9);
+  if (typeof drawPaper === "function") drawPaper();   // Draw tab: paper, drawing and ink (draw.js)
   if (ghost) drawArm(ghost.points, .35, true);
   // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
   if (S.points) lastPts = S.points;
@@ -1047,7 +1063,6 @@ function draw() {
   }
   $("hud").innerHTML = S.tcp ? `${S.model_name || ""}<br>X <b>${S.tcp[0].toFixed(1)}</b> Y <b>${S.tcp[1].toFixed(1)}</b> Z <b>${S.tcp[2].toFixed(1)}</b> mm<br>RX <b>${S.tcp[3].toFixed(1)}</b> RY <b>${S.tcp[4].toFixed(1)}</b> RZ <b>${S.tcp[5].toFixed(1)}</b>°`
     : (S.bridge_down ? "bridge not reachable" : S.connected ? "waiting for data…" : "not connected");
-  requestAnimationFrame(draw);
 }
 
 // mouse & touch: orbit / pan / zoom (wheel or pinch) / drag TCP target (Shift or 2nd finger hold = vertical)

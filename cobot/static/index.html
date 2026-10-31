@@ -178,7 +178,7 @@ body.display .dispbanner.show{display:block}
   </div>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="script">Script</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
+    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="draw">Draw</button><button data-tab="script">Script</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
   </nav>
 
   <!-- LEFT -->
@@ -332,7 +332,7 @@ body.display .dispbanner.show{display:block}
           Two outputs (double-acting valve): one is switched on and the other off. "wait s" gives the gripper time to move before the next step.</div>
         <div class="row" style="margin-top:6px"><button id="gTestClose">Close now</button><button id="gTestOpen">Open now</button></div>
         <div class="row" style="color:var(--mute);margin-top:8px;flex-wrap:wrap">
-          <span>Simulator gripper <select id="gModel"><option value="">none</option><option value="egpc40">SCHUNK Co-act EGP-C 40</option></select></span>
+          <span>Simulator gripper <select id="gModel"><option value="">none</option><option value="egpc40">SCHUNK Co-act EGP-C 40</option><option value="pen">Pen holder (drawing)</option></select></span>
           <button id="gSimTool">Set sim tool + payload</button>
         </div>
         <div style="color:var(--mute);font-size:12px;margin-top:4px">Shown in the 3D view in the simulator and demo only; its jaws follow the outputs above.
@@ -367,6 +367,52 @@ body.display .dispbanner.show{display:block}
       <div class="light" style="margin-top:8px">Loaded: <b id="progLoaded" style="color:var(--text)">—</b> · <b id="progState" style="color:var(--text)">—</b> · line <b id="progLine" style="color:var(--text)">—</b></div>
       <div class="note">Programs run at the speeds saved in them: this page's speed limit doesn't apply. Keep the pendant E-stop in reach. The cobot can't list its programs, so type the name; names you load are remembered here.</div>
     </div>
+    <div class="card" data-tab="draw" id="drawCard">
+      <div class="row" style="justify-content:space-between"><h2>Draw (G-code)</h2>
+        <div class="row"><button id="dRun" class="primary">Draw</button><button id="dPause">Pause</button><button id="dStop" class="danger">Stop</button></div></div>
+      <div class="row"><button id="dOpen">Open G-code</button><button id="dSample">Sample</button>
+        <label class="row" style="color:var(--mute)"><input type="checkbox" id="dShow" checked> show paper</label>
+        <input type="file" id="dFile" accept=".gcode,.nc,.ngc,.gc,.tap,.txt" style="display:none"></div>
+      <div class="note" id="dInfo"></div>
+      <div class="mono" id="dProg" style="margin-top:4px;color:var(--accent)"></div>
+
+      <div class="cfgh">Paper</div>
+      <div class="row" style="color:var(--mute)">Corner (G-code X0 Y0): <b class="mono" id="dOrigin" style="color:var(--text)">not set</b><button id="dSetOrigin">Set corner = pen tip now</button></div>
+      <div class="grid4" style="margin-top:6px">
+        <label class="f">Width mm<input id="dPW" inputmode="decimal"></label>
+        <label class="f">Height mm<input id="dPH" inputmode="decimal"></label>
+        <label class="f">Rotate °<input id="dRot" inputmode="decimal"></label>
+        <label class="f">Scale %<input id="dScale" inputmode="decimal"></label>
+        <label class="f">Shift X mm<input id="dDX" inputmode="decimal"></label>
+        <label class="f">Shift Y mm<input id="dDY" inputmode="decimal"></label>
+        <div style="grid-column:span 2;align-self:end"><button id="dFit">Fit to paper</button></div>
+      </div>
+
+      <div class="cfgh">Pen</div>
+      <div class="grid4">
+        <label class="f">Lift mm<input id="dLift" inputmode="decimal"></label>
+        <label class="f">Press mm<input id="dPress" inputmode="decimal"></label>
+        <label class="f">Draw mm/s<input id="dSpd" inputmode="decimal"></label>
+        <label class="f">Travel mm/s<input id="dTrv" inputmode="decimal"></label>
+        <label class="f">Down at Z ≤<input id="dZDown" inputmode="decimal"></label>
+      </div>
+
+      <div class="cfgh">Start and finish <span class="note" style="margin:0">(joint moves, optional)</span></div>
+      <div class="row" style="color:var(--mute)">Start: <b id="dStartTxt" style="color:var(--text)">not set</b>
+        <button id="dSetStart">Set = now</button><button id="dGoStart">Go</button><button id="dClrStart">✕</button></div>
+      <div class="row" style="color:var(--mute);margin-top:4px">Finish: <b id="dFinishTxt" style="color:var(--text)">not set</b>
+        <button id="dSetFinish">Set = now</button><button id="dGoFinish">Go</button><button id="dClrFinish">✕</button></div>
+      <div class="row" style="margin-top:8px"><button id="dPlc">Export for TM262</button><button id="dClearInk">Clear ink</button></div>
+      <details class="calib"><summary>How to set it up</summary>
+        <div class="note" style="margin-top:4px">
+          1. Fit the pen in a <b>spring-loaded holder</b> so it can give a little; a rigid pen tears paper or snaps. Set the tool (TCP) to the pen tip in Setup (simulator: Points → Gripper outputs → Pen).<br>
+          2. Tape the paper down. Jog the pen tip until it just touches the paper's corner, pointing straight down, then <b>Set corner</b>. The drawing's X runs along the cobot's X (turn it with Rotate).<br>
+          3. <b>Press</b> pushes the pen that far below the touch height while drawing; <b>Lift</b> raises it between lines. The floor limit in Setup must be below the paper.<br>
+          4. Open a G-code file. Most pen-plotter exports work: Z moves, M3/M5, or G0/G1. Arcs (G2/G3) are split into short lines. <b>Fit to paper</b> scales and centres it.<br>
+          5. <b>Draw</b> moves to Start, draws, then moves to Finish. <b>Pause</b> lifts the pen and waits. On the real cobot the speed limit still applies.<br>
+          <b>Export for TM262</b> saves the same path as Structured Text for Machine Expert (a point list the PLC runs with MoveL).</div>
+      </details>
+    </div>
     <div class="card" data-tab="data">
       <h2>Digital I/O</h2>
       <div style="color:var(--mute);font-size:11px;margin-bottom:4px">DO 0–15 (tap to toggle)</div>
@@ -392,5 +438,6 @@ body.display .dispbanner.show{display:block}
 
 <script src="sim.js"></script>
 <script src="app.js"></script>
+<script src="draw.js"></script>
 </body>
 </html>
