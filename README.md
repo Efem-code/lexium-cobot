@@ -57,7 +57,7 @@ Details and everything verified on the real controller: [docs/REAL_HARDWARE.md](
 | **Data** | joint speeds/currents/temperatures, digital I/O (tap a DO to switch it), controller log, **record to CSV**. |
 | **Setup** | connect (simulator or real cobot); **payload**; **tool (TCP) slots**, active tool and **4-point tool calibration**; **user frames**; **bridge limits** (floor height, max joint and linear speed); collision sensitivity (view only). Every setting change is read back from the cobot to confirm it took. |
 
-**STOP** (header) or **Esc** stops all motion and any running program.
+**STOP** (header) or **Esc** stops all motion and whatever is running (drawing, waypoint play, script, live drag). Only one of those moves the arm at a time: while one runs, the others, jog and the Go buttons are refused with a message. **Setup → Features** switches Draw, Live drag, gripper steps, Script and cobot Programs on or off (remembered per device).
 
 **TVs and shared screens:** open `http://<PC address>:8765/display` (the addresses and PIN are listed under **Setup → Phones, tablets & TVs** once sharing is on). It shows the arm full screen with status and a large E-stop / fault banner, and sends no commands: touching it can only rotate and zoom the view.
 

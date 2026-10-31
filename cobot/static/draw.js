@@ -216,13 +216,14 @@ async function checkJob(ops) {
 }
 
 $("dRun").onclick = async () => {
-  if (JOB.active) return;
+  if (JOB.active || busy("draw")) return;
   if (!drawing) { toast("Load a drawing first"); return; }
   if (!S.connected) { toast("Not connected"); return; }
   if (S.errcode) { toast("Clear the controller error first (Robot tab → Clear error)"); return; }
   const ops = plan();
   try { await checkJob(ops); } catch (e) { toast(e.message); $("dProg").textContent = e.message; return; }
   if (S.mode === "real" && !confirm(`Draw "${drawing.name}" with the REAL arm?\n\n${ops.length} moves at up to ${DRAW.drawSpeed} mm/s (the speed limit still applies). Paper taped down, pen holder fitted, area clear, E-stop in reach.`)) return;
+  if (!FEAT.draw || !claim("draw")) return;
   Object.assign(JOB, {active: true, paused: false, i: 0, ops, down: false});
   ink = [];
   runJob();
@@ -272,7 +273,7 @@ async function runJob() {
     $("dProg").textContent = (e.message === "stopped" ? "■ stopped" : "✗ " + e.message) + ` at move ${JOB.i} of ${ops.length}`;
     if (e.message !== "stopped") toast("Drawing stopped: " + e.message);
   } finally {
-    JOB.active = false; JOB.paused = false; JOB.down = false;
+    JOB.active = false; JOB.paused = false; JOB.down = false; release("draw");
     $("dRun").disabled = false; $("dPause").textContent = "Pause";
   }
 }

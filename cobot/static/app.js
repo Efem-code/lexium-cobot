@@ -48,6 +48,20 @@ async function api(path, body) {
   return j;
 }
 const cmd = (name, extra = {}) => api("/api/cmd", Object.assign({cmdName: name}, extra));
+// ------------------------------------------------------------ features + one mover at a time
+// Features can be switched off in Setup (hidden, and they can't move the arm). Drawing, waypoint play, a script
+// and live drag each own the arm while they run: jog, Go buttons and the other features wait until it ends.
+const FEAT = {draw: true, live: true, gripper: true, script: true, programs: true};
+try { Object.assign(FEAT, JSON.parse(localStorage.getItem("features") || "{}")); } catch (_) {}
+const RUN = {owner: null};
+const OWNER = {draw: "A drawing", play: "Waypoint play", script: "A script", live: "Live drag"};
+function busy(name) {
+  if (RUN.owner && RUN.owner !== name) { toast(`${OWNER[RUN.owner]} is running: stop it first${RUN.owner === "live" ? " (Live drag button)" : " (STOP)"}`); return true; }
+  if (typeof P !== "undefined" && P.state === "running") { toast("A program is running on the cobot: stop it first"); return true; }
+  return false;
+}
+const claim = name => busy(name) ? false : (RUN.owner = name, true);
+const release = name => { if (RUN.owner === name) RUN.owner = null; };
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3500); }
 
 // ------------------------------------------------------------ PIN (bridge only)
@@ -74,7 +88,9 @@ function holdButton(btn, start) {
   let timer = null, active = false;
   const stop = () => { if (!active) return; active = false; btn.classList.remove("held"); clearInterval(timer); api("/api/jog/stop", {}); };
   btn.addEventListener("pointerdown", async e => {
-    e.preventDefault(); try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+    if (busy()) return;
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
     active = true; btn.classList.add("held");
     if (navigator.vibrate) navigator.vibrate(15);
     const r = await start();
@@ -149,13 +165,20 @@ $("arm").onchange = e => {
 };
 $("model").onchange = () => api("/api/model", {model: $("model").value});
 $("modelDemo").onchange = () => api("/api/model", {model: $("modelDemo").value});
-$("btnStop").onclick = () => api("/api/stop", {});
+// STOP ends whatever is running (drawing, play, script, live drag) as well as the motion
+function stopAll() {
+  api("/api/stop", {});
+  playing = false; if (scRun) scRun.aborted = true; setLive(false);
+  if (typeof JOB !== "undefined" && JOB.active) JOB.active = false;
+}
+$("btnStop").onclick = stopAll;
 $("bPower").onclick = () => cmd("power_on");
 $("bPowerOff").onclick = () => cmd("power_off");
 $("bEnable").onclick = () => cmd("enable_robot");
 $("bDisable").onclick = () => cmd("disable_robot");
 $("bClear").onclick = () => cmd("clear_error");
 $("bHome").onclick = () => {
+  if (busy()) return;
   if (S.mode === "real" && !confirm(`Move the REAL arm to the home pose?
 
 All joints move at once, at ${S.speed_override ?? "?"}% speed. Make sure the path is clear.`)) return;
@@ -165,7 +188,7 @@ $("bEstop").onclick = () => cmd("sim_estop", {on: !S.estop});
 $("bColl").onclick = () => cmd("sim_protective_stop");
 $("bResetSim").onclick = () => cmd("clear_error");
 $("bSrc").onclick = () => cmd("sim_control_source", {source: S.control_source === "remote" ? "local" : "remote"});
-$("bSliders").onclick = () => { cmd("joint_move", {relFlag: 0, jointPosition: sliderJoints(), speed: jspeed(), accel: 100}); sliderDirty = false; ghost = null; };
+$("bSliders").onclick = () => { if (busy()) return; cmd("joint_move", {relFlag: 0, jointPosition: sliderJoints(), speed: jspeed(), accel: 100}); sliderDirty = false; ghost = null; };
 $("bSync").onclick = syncSliders;
 for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]]) {
   $(sl).oninput = e => { $(lab).textContent = e.target.value + "%"; };
@@ -174,8 +197,8 @@ for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]]) {
 $("bTeach").onclick = () => { if (!S.joints) return; waypoints.push({joints: [...S.joints], tcp: [...S.tcp]}); drawWps(); };
 $("bPlay").onclick = playWps;
 $("tCancel").onclick = () => { target = null; ghost = null; $("targetBar").classList.remove("show"); };
-$("tLin").onclick = async () => { if (!target) return; await cmd("moveL", {relFlag: 0, cartPosition: target.pose, speed: +$("cspd").value * 2, accel: 500}); $("tCancel").onclick(); };
-$("tJnt").onclick = async () => { if (!target || !ghost) return; await cmd("joint_move", {relFlag: 0, jointPosition: ghost.joints, speed: jspeed(), accel: 100}); $("tCancel").onclick(); };
+$("tLin").onclick = async () => { if (!target || busy()) return; await cmd("moveL", {relFlag: 0, cartPosition: target.pose, speed: +$("cspd").value * 2, accel: 500}); $("tCancel").onclick(); };
+$("tJnt").onclick = async () => { if (!target || !ghost || busy()) return; await cmd("joint_move", {relFlag: 0, jointPosition: ghost.joints, speed: jspeed(), accel: 100}); $("tCancel").onclick(); };
 
 // ------------------------------------------------------------ gripper (digital outputs), usable as waypoint steps
 const GRIP = {close: 0, open: -1, wait: 0.5, model: "egpc40"};   // open -1 = single output: Close DO off opens it
@@ -230,7 +253,7 @@ function drawWps() {
     const b = [...d.querySelectorAll("button")];
     if (i) b.shift().onclick = () => { [waypoints[i - 1], waypoints[i]] = [waypoints[i], waypoints[i - 1]]; drawWps(); };
     if (!w.grip) b.shift().onclick = () => { w.move = mv === "L" ? "J" : "L"; drawWps(); };
-    b[0].onclick = () => wpMove(w);
+    b[0].onclick = () => !busy() && (!w.grip || FEAT.gripper) && wpMove(w);
     b[1].onclick = () => { waypoints.splice(i, 1); drawWps(); };
     W.appendChild(d);
   });
@@ -246,7 +269,7 @@ $("dwell").onchange = e => { try { localStorage.setItem("dwell", e.target.value)
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 async function playWps() {
   if (playing) { playing = false; $("bPlay").textContent = "Play"; api("/api/stop", {}); return; }
-  if (!waypoints.length) return;
+  if (!waypoints.length || !claim("play")) return;
   playing = true; $("bPlay").textContent = "Stop play";
   let cycle = 0;
   // Loop is re-read every cycle, so unticking it finishes the current cycle and stops.
@@ -254,6 +277,7 @@ async function playWps() {
     cycle++; $("cycles").textContent = "cycle " + cycle;
     for (const w of waypoints) {
       if (!playing) break;
+      if (w.grip && !FEAT.gripper) continue;   // gripper switched off in Setup
       const r = await wpMove(w);
       if (r.errorCode !== "0") { playing = false; break; }
       if (w.grip) continue;   // its own wait already ran; the pause is between moves
@@ -271,7 +295,7 @@ async function playWps() {
       if (playing && dwell) await sleep(dwell * 1000);
     }
   } while (playing && $("loop").checked);
-  playing = false; $("bPlay").textContent = "Play";
+  playing = false; release("play"); $("bPlay").textContent = "Play";
 }
 
 // ------------------------------------------------------------ cobot setup (payload, tool, user frame)
@@ -467,11 +491,13 @@ $("progLoad").onclick = async () => {
   pollProg(true);
 };
 $("progRun").onclick = async () => {
+  if (busy()) return;
   if (S.mode === "real" && !confirm(`Run "${P.loaded}" on the REAL cobot?\n\nIt runs at the speeds saved in the program: this page's speed limit doesn't apply. Keep the E-stop in reach.`)) return;
   await cmd("play_program"); pollProg(true);
 };
 $("progPause").onclick = async () => { await cmd("pause_program"); pollProg(true); };
 $("progResume").onclick = async () => {
+  if (busy()) return;
   if (S.mode === "real" && !confirm(`Resume "${P.loaded}" on the REAL cobot?`)) return;
   await cmd("resume_program"); pollProg(true);
 };
@@ -690,6 +716,7 @@ function makeRobot(run) {
 $("scRun").onclick = async () => {
   if (scRun) { toast("A script is already running"); return; }
   if (S.mode === "real" && !confirm("Run this script on the REAL cobot?\n\nThe bridge limits and speed limit apply. Keep the E-stop in reach.")) return;
+  if (!claim("script")) return;
   const run = scRun = {aborted: false};
   $("scOut").innerHTML = ""; $("scRun").disabled = true;
   const Async = Object.getPrototypeOf(async function () {}).constructor;
@@ -702,7 +729,7 @@ $("scRun").onclick = async () => {
   } catch (e) {
     scLog("e", (run.aborted ? "■ " : "✗ ") + e.message);
     if (!run.aborted) api("/api/stop", {});
-  } finally { scRun = null; $("scRun").disabled = false; }
+  } finally { scRun = null; $("scRun").disabled = false; release("script"); }
 };
 $("scStop").onclick = () => { if (scRun) scRun.aborted = true; api("/api/stop", {}); };
 
@@ -986,7 +1013,7 @@ function drawGripper(fl, alpha) {
   for (const p of jawSide ? [...body, ...jaws] : [...jaws, ...body]) box(p.c, [ex, ey, ez], p.h, p.col, p.sides);
   ctx.globalAlpha = 1;
 }
-const showGripper = () => !!GRIPPERS[GRIP.model] && S.mode !== "real";
+const showGripper = () => !!GRIPPERS[GRIP.model] && S.mode !== "real" && (FEAT.gripper || !!GRIPPERS[GRIP.model].pen);
 function drawFrame(p, R, len, alpha) {
   const cols = ["#ff5c5c", "#3dcd58", "#4c9aff"];
   for (let k = 0; k < 3; k++) { ctx.globalAlpha = alpha; line(p, add(p, [R[0][k] * len, R[1][k] * len, R[2][k] * len]), cols[k], 2); }
@@ -1026,7 +1053,7 @@ function draw() {
     ctx.fillStyle = "#4b4f55"; poly(top); ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.stroke();
   } else { ctx.fillStyle = "#2e3034"; poly(ring(95, 0, 32)); ctx.fill(); }
   drawFrame([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 200, .9);
-  if (typeof drawPaper === "function") drawPaper();   // Draw tab: paper, drawing and ink (draw.js)
+  if (typeof drawPaper === "function" && FEAT.draw) drawPaper();   // Draw tab: paper, drawing and ink (draw.js)
   if (ghost) drawArm(ghost.points, .35, true);
   // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
   if (S.points) lastPts = S.points;
@@ -1130,13 +1157,15 @@ async function requestIK() {
   }
   ikBusy = false;
 }
-window.addEventListener("keydown", e => { if (e.key === "Escape") { api("/api/stop", {}); setLive(false); $("tCancel").onclick(); } });
+window.addEventListener("keydown", e => { if (e.key === "Escape") { stopAll(); $("tCancel").onclick(); } });
 
 // ------------------------------------------------------------ live drag: the arm follows the orange ball while you drag it
 // The arm goes to where the ball is; as soon as it gets there it goes to where the ball is now. One straight-line
 // move at a time (at most 100 mm each), so every step still passes the bridge's floor, reach and speed checks.
 let live = false, following = false;
 function setLive(on) {
+  if (on && (!FEAT.live || !claim("live"))) return;
+  if (!on) release("live");
   if (on && S.mode === "real" && !confirm("Live drag on the REAL cobot?\n\nThe arm follows the orange ball while you drag it, at the Cartesian jog speed and the speed limit. Area clear, E-stop in reach.")) on = false;
   live = on;
   $("liveDrag").textContent = live ? "Live drag: ON" : "Live drag: off";
@@ -1179,6 +1208,24 @@ async function follow() {
   }
 }
 
+// ------------------------------------------------------------ feature switches (Setup)
+const FEAT_IDS = {draw: "ftDraw", live: "ftLive", gripper: "ftGrip", script: "ftScript", programs: "ftProg"};
+function applyFeatures() {
+  for (const [k, id] of Object.entries(FEAT_IDS)) { $(id).checked = FEAT[k]; document.body.classList.toggle("off-" + k, !FEAT[k]); }
+  // a feature switched off while it runs is stopped
+  if (!FEAT.live && live) setLive(false);
+  if (!FEAT.draw && typeof JOB !== "undefined" && JOB.active) { JOB.active = false; api("/api/stop", {}); }
+  if (!FEAT.script && scRun) { scRun.aborted = true; api("/api/stop", {}); }
+  // phones: if the open tab was just hidden, go back to Jog
+  const sel = document.querySelector("#tabs button.sel");
+  if (sel && getComputedStyle(sel).display === "none") document.querySelector('#tabs button[data-tab="jog"]').click();
+}
+for (const [k, id] of Object.entries(FEAT_IDS)) $(id).onchange = e => {
+  FEAT[k] = e.target.checked;
+  try { localStorage.setItem("features", JSON.stringify(FEAT)); } catch (_) {}
+  applyFeatures();
+};
+
 // ------------------------------------------------------------ boot
 (async () => {
   if (!DEMO) {
@@ -1188,7 +1235,7 @@ async function follow() {
   const m = await api("/api/models"); profiles = m.profiles; limits = m.limits; HOME = m.home;
   for (const sel of ["model", "modelDemo"])
     for (const [k, v] of Object.entries(profiles)) { const o = document.createElement("option"); o.value = k; o.textContent = v.name; $(sel).appendChild(o); }
-  buildJog(); drawWps();
+  buildJog(); drawWps(); applyFeatures();
   limits.forEach(([lo, hi], i) => { $("js" + i).min = lo; $("js" + i).max = hi; });
   T.subscribe(s => { S = s; render(); });
   setTimeout(syncSliders, 600);
