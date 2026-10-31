@@ -1101,6 +1101,7 @@ cv.addEventListener("pointermove", e => {
     if (e.shiftKey || drag.vertical) { const p = rayVertical(x, y, target.pose.slice(0, 3)); if (p) target.pose[2] = p[2]; }
     else { const p = rayPlaneZ(x, y, target.pose[2]); if (p) { target.pose[0] = p[0]; target.pose[1] = p[1]; } }
     requestIK();
+    if (live) follow();
   }
 });
 function endPointer(e) {
@@ -1108,7 +1109,7 @@ function endPointer(e) {
   if (pointers.size < 2) pinch = null;
   if (drag && drag.kind === "tcp") {
     if (drag.vertical && pointers.size === 1) { drag.vertical = false; return; }
-    if (pointers.size === 0) { $("targetBar").classList.add("show"); requestIK(); }
+    if (pointers.size === 0) { if (!live) $("targetBar").classList.add("show"); requestIK(); }
   }
   if (pointers.size === 0) drag = null;
 }
@@ -1129,7 +1130,54 @@ async function requestIK() {
   }
   ikBusy = false;
 }
-window.addEventListener("keydown", e => { if (e.key === "Escape") { api("/api/stop", {}); $("tCancel").onclick(); } });
+window.addEventListener("keydown", e => { if (e.key === "Escape") { api("/api/stop", {}); setLive(false); $("tCancel").onclick(); } });
+
+// ------------------------------------------------------------ live drag: the arm follows the orange ball while you drag it
+// The arm goes to where the ball is; as soon as it gets there it goes to where the ball is now. One straight-line
+// move at a time (at most 100 mm each), so every step still passes the bridge's floor, reach and speed checks.
+let live = false, following = false;
+function setLive(on) {
+  if (on && S.mode === "real" && !confirm("Live drag on the REAL cobot?\n\nThe arm follows the orange ball while you drag it, at the Cartesian jog speed and the speed limit. Area clear, E-stop in reach.")) on = false;
+  live = on;
+  $("liveDrag").textContent = live ? "Live drag: ON" : "Live drag: off";
+  $("liveDrag").classList.toggle("on", live);
+  if (live) { $("targetBar").classList.remove("show"); }
+}
+$("liveDrag").onclick = () => setLive(!live);
+async function follow() {
+  if (following) return;
+  following = true;
+  let failed = null;
+  const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  try {
+    while (live && target && S.tcp) {
+      const dragging = drag && drag.kind === "tcp", goal = target.pose.slice(0, 3), here = S.tcp.slice(0, 3);
+      const zMin = (S.limits || {}).z_min;
+      if (zMin != null) goal[2] = Math.max(goal[2], zMin);   // dragged below the floor: go down to the floor, no further
+      const d = d3(goal, here);
+      // nothing to do (there already, unreachable, or this spot was just refused): wait for the ball to move
+      if (d < 0.5 || !target.ok || (failed && d3(goal, failed) < 1)) { if (!dragging) break; await sleep(40); continue; }
+      const step = d > 100 ? add(here, mul(sub(goal, here), 100 / d)) : goal;
+      const r = await api("/api/cmd", {cmdName: "moveL", relFlag: 0, cartPosition: [...step, ...target.pose.slice(3)], speed: lspeed(), accel: 1000});
+      if (!okR(r)) { failed = goal; continue; }
+      failed = null;
+      // wait until it is there, or has stopped short (a limit, a fault)
+      const t0 = Date.now();
+      let moved = false;
+      for (;;) {
+        await sleep(30);
+        if (S.inpos === false) moved = true;
+        const t = Date.now() - t0;
+        if (S.inpos !== false && (d3(S.tcp, step) < 1 || (moved && t > 100) || t > 1500)) break;
+        if (t > 15000 || !live) break;
+      }
+      if (S.estop || S.protective_stop || S.errcode || S.enabled === false) { setLive(false); toast("Live drag off: the robot stopped (fault or not enabled)"); break; }
+    }
+  } finally {
+    following = false;
+    if (!(drag && drag.kind === "tcp") && live) { target = null; ghost = null; }
+  }
+}
 
 // ------------------------------------------------------------ boot
 (async () => {

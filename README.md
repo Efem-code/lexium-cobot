@@ -48,7 +48,7 @@ Details and everything verified on the real controller: [docs/REAL_HARDWARE.md](
 
 | Tab / card | What you can do |
 |---|---|
-| **3D view** | live arm (matches the real one to < 0.3 mm). Drag the orange TCP ball to set a target (Shift+drag = up/down), preview it, then *Move linear* or *Move joint*. Drag = orbit, right-drag = pan, wheel = zoom. |
+| **3D view** | live arm (matches the real one to < 0.3 mm). Drag the orange TCP ball to set a target (Shift+drag = up/down), preview it, then *Move linear* or *Move joint*. With **Live drag** on (button in the view), the arm follows the ball while you drag it with the mouse or a finger: one straight-line step at a time (at most 100 mm each), each one checked against the floor, reach and speed limits; it stops at the floor rather than refusing. Drag = orbit, right-drag = pan, wheel = zoom. |
 | **Jog** | hold-to-run joint and Cartesian (base/tool) jog. Release, a closed tab or a dropped network stops the arm within 350 ms. Joint sliders + *Move to sliders*. |
 | **Robot** | power on/off, enable/disable, clear error, go home (asks first on the real cobot), status lights. |
 | **Points** | teach waypoints (J = joint move, L = straight line per point), add **gripper open/close steps** (one digital output, or two for a double-acting valve, with a wait time; the simulator draws a SCHUNK Co-act EGP-C 40 whose jaws follow those outputs), reorder steps, play once or **loop continuously** with a pause, export/import as files, turn them into a script. **Programs on the cobot**: load a program saved on the controller by name, run / pause / resume / stop, with live state and line. |
