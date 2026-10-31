@@ -52,8 +52,12 @@ class VirtualController:
             self.store.write("coils", RM.COIL_DI_BASE, s["din"][:RM.IO_COUNT])
             time.sleep(0.01)
 
-    def start(self):
+    def start(self, ready=False):
+        """ready=True: powered on and enabled, so moves work at once (a real cobot starts off)."""
         self.robot.start()
+        if ready:
+            self.robot.power_on()
+            self.robot.enable()
         self.modbus.start()
         self.jaka.start()
         threading.Thread(target=self._publish, daemon=True, name="modbus-publish").start()

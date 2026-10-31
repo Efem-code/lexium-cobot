@@ -47,7 +47,7 @@ def _ensure_local_sim(host, modbus_port, cmd_port, status_port, model):
         pass
     from .sim_server import VirtualController
     try:
-        _local_sims.append(VirtualController("127.0.0.1", modbus_port, cmd_port, status_port, model).start())
+        _local_sims.append(VirtualController("127.0.0.1", modbus_port, cmd_port, status_port, model).start(ready=True))
         time.sleep(0.3)
     except OSError:
         pass  # a port is taken: connect() reports the error

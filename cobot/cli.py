@@ -137,7 +137,7 @@ def main(argv=None):
     if a.what in ("all", "sim"):
         host = "0.0.0.0" if a.public else "127.0.0.1"
         try:
-            VirtualController(host, a.modbus_port, a.cmd_port, a.status_port, a.model).start()
+            VirtualController(host, a.modbus_port, a.cmd_port, a.status_port, a.model).start(ready=True)
         except OSError as e:
             raise SystemExit(f"[sim] can't open the simulator ports ({e}). Is the app already running? "
                              "Close it, or start with: lexium-cobot ui")

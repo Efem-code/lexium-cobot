@@ -342,6 +342,7 @@ class LocalTransport {
     let model = "LXMRL03";
     try { model = localStorage.getItem("demoModel") || model; } catch (_) {}
     this.robot = new SimRobot(PROFILES[model] ? model : "LXMRL03");
+    this.robot.powerOn(); this.robot.enable();   // the demo starts ready to move
     this.jogActive = false; this.jogLast = 0; this.lastError = "";
     // same bridge limits as driver.py
     this.limits = {z_min: 0, joint_speed_max: 120, linear_speed_max: 500};

@@ -1017,8 +1017,12 @@ function draw() {
   else if (!lastPts && !lastPtsAsked) { lastPtsAsked = true; api("/api/fk", {joints: [0, 90, -90, 90, 90, 0]}).then(r => { if (r.points && !lastPts) lastPts = r.points; }).catch(() => { lastPtsAsked = false; }); }
   drawArm(S.points || lastPts, S.points ? 1 : .3, false, !!S.points);
   const feedLost = S.mode === "real" && S.connected && !S.stream_ok && !S.modbus_ok;
-  if (!S.points || feedLost) {
+  // powered off / disabled: every move is refused, so say so where people are looking
+  const notReady = S.points && S.connected && !S.estop && (S.powered === false || S.enabled === false);
+  if (!S.points || feedLost || (notReady && !DISPLAY)) {
+    const who = S.mode === "real" ? "Cobot" : "Simulator";
     const msg = feedLost && S.points ? "Status feed from the cobot lost: reconnecting… (the arm shown may be out of date)"
+      : notReady ? `${who} is ${S.powered === false ? "powered off" : "not enabled"}: moves won't run. Robot tab → ${S.powered === false ? "Power on, then Enable" : "Enable"}`
       : S.bridge_down ? "Bridge not reachable: is the app still running on the PC?"
       : S.mode === "real" ? `No data from the cobot${S.host ? " at " + S.host : ""}: check the PC is on the cobot Wi-Fi`
       : S.connected ? "Waiting for data…" : "Not connected: Setup → Connect";
