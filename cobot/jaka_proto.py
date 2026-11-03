@@ -319,6 +319,11 @@ class JakaServer:
             s.server_close()
 
 
+def ssl_want_read_errors():
+    import ssl
+    return ssl.SSLWantReadError
+
+
 # =================================================================== client
 class JakaClient:
     """Request/response client for port 10001."""
@@ -352,6 +357,7 @@ class JakaClient:
         with self.lock:
             if not self.sock:
                 self.connect()
+            self._drain()   # a reply that came in late for an earlier command must not answer this one
             try:
                 self.sock.sendall(json.dumps(msg).encode())
                 deadline = time.time() + self.timeout
@@ -362,7 +368,28 @@ class JakaClient:
                     for reply in self.stream.feed(data):
                         if reply.get("cmdName") == cmd_name:
                             return reply
-                raise TimeoutError(f"no reply to {cmd_name}")
+                raise TimeoutError(f"no reply to {cmd_name} within {self.timeout:.0f} s")
+            except TimeoutError:
+                # keep the connection: closing the controlling connection can make the cobot stop the arm
+                # (network-fault reaction), and a slow reply is not a broken link
+                raise
             except (OSError, ConnectionError):
                 self.close()
                 raise
+
+    def _drain(self):
+        try:
+            self.sock.settimeout(0)
+            while True:
+                data = self.sock.recv(65536)
+                if not data:
+                    raise ConnectionError("controller closed the connection")
+                self.stream.feed(data)
+        except (BlockingIOError, ssl_want_read_errors()):
+            pass
+        except (OSError, ConnectionError):
+            self.close()
+            self.connect()
+        finally:
+            if self.sock:
+                self.sock.settimeout(self.timeout)

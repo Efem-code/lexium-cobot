@@ -13,6 +13,7 @@ Safety rules built in:
 import json
 import threading
 import time
+from collections import deque
 
 from . import kinematics as K
 from . import regmap as RM
@@ -71,6 +72,7 @@ class CobotDriver:
         self.stream_ok = False
         self.motion_armed = False
         self.last_error = ""
+        self.events = deque(maxlen=200)   # bridge log: commands sent, reply times, stops the bridge made itself
         self.jog_active = None
         self.jog_last = 0.0
         self.speed = 1.0           # bridge-side speed override (real mode), 0.01..1
@@ -95,7 +97,7 @@ class CobotDriver:
             self.mode, self.host, self.tls = mode, host, tls
             self.ports = dict(modbus=modbus_port, cmd=cmd_port, status=status_port)
             self.mb = ModbusClient(host, modbus_port, timeout=1.5)
-            self.cmd = JakaClient(host, cmd_port, timeout=2.0, tls=tls)
+            self.cmd = JakaClient(host, cmd_port, timeout=4.0, tls=tls)
             self.motion_armed = (mode == "sim")
             self.speed = REAL_DEFAULT_SPEED if mode == "real" else 1.0
             self.connected = True
@@ -295,6 +297,8 @@ class CobotDriver:
                 stop = None
                 if self.jog_active and time.time() - self.jog_last > JOG_TIMEOUT:
                     stop, self.jog_active = self.jog_active, None
+            if stop:
+                self.event(f"jog stopped: no keep-alive from the page for {time.time() - self.jog_last:.2f} s (dead-man)")
             if not stop and self.jog_active:
                 # floor limit: stop a jog that takes the TCP down through z_min
                 # (jogging back up out of it stays allowed)
@@ -305,6 +309,7 @@ class CobotDriver:
                         with self.lock:
                             stop, self.jog_active = self.jog_active, None
                         self.last_error = f"jog stopped at the floor limit (Z {z:.0f} mm)"
+                        self.event(self.last_error)
                     self._jog_z = z
             elif not self.jog_active:
                 self._jog_z = None
@@ -335,15 +340,23 @@ class CobotDriver:
                 fields = self._check_motion(name, fields)
             except LimitError as e:
                 self.last_error = f"{name}: {e}"
+                self.event(f"{name} refused by the bridge: {e}")
                 raise
+        t0 = time.time()
         try:
             r = self.cmd.send(name, **fields)
             self.cmd_ok = True
         except Exception as e:
-            self.cmd_ok = False
+            self.cmd_ok = isinstance(e, TimeoutError)   # a slow reply keeps the connection
             self.last_error = f"command port {self.ports.get('cmd')}: {e}"
+            self.event(f"{name} FAILED after {(time.time() - t0) * 1000:.0f} ms: {e or type(e).__name__}")
             raise
-        if r.get("errorCode") not in ("0", 0):
+        ms = (time.time() - t0) * 1000
+        bad = r.get("errorCode") not in ("0", 0)
+        # every command that can change something is logged; read-only polls only when slow or refused
+        if bad or ms > 500 or not name.startswith(("get_", "kine_")):
+            self.event(f"{name} {'ERROR ' + str(r.get('errorCode')) + ': ' + str(r.get('errorMsg')) if bad else 'ok'} ({ms:.0f} ms)")
+        if bad:
             self.last_error = f"{name}: {r.get('errorMsg')}"
         elif name in ("set_tool_id", "set_tool_offsets"):
             self.sync_tool()
@@ -396,6 +409,9 @@ class CobotDriver:
     def ik(self, pose, seed):
         return self.arm.ik(pose, seed)
 
+    def event(self, text):
+        self.events.append(time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}  " + text)
+
     # ----------------------------------------------------------- status
     def status(self):
         with self.lock:
@@ -407,7 +423,8 @@ class CobotDriver:
                        last_error=self.last_error, jogging=bool(self.jog_active),
                        model=self.arm.model, model_name=self.arm.profile["name"],
                        tls=self.tls, speed_override=round(self.speed * 100),
-                       limits=dict(self.limits), tool=list(self.arm.tool), tool_id=self.tool_id)
+                       limits=dict(self.limits), tool=list(self.arm.tool), tool_id=self.tool_id,
+                       bridge_log=list(self.events)[-40:])
         if not st and ex.get("joint_position"):
             out.update(_state_from_stream(ex))
             try:

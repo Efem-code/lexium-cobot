@@ -272,6 +272,7 @@ async function runJob() {
     if (e.message !== "stopped") api("/api/stop", {});
     $("dProg").textContent = (e.message === "stopped" ? "■ stopped" : "✗ " + e.message) + ` at move ${JOB.i} of ${ops.length}`;
     if (e.message !== "stopped") toast("Drawing stopped: " + e.message);
+    note(`drawing stopped at move ${JOB.i} of ${ops.length}: ${e.message}`);
   } finally {
     JOB.active = false; JOB.paused = false; JOB.down = false; release("draw");
     $("dRun").disabled = false; $("dPause").textContent = "Pause";

@@ -62,6 +62,14 @@ function busy(name) {
 }
 const claim = name => busy(name) ? false : (RUN.owner = name, true);
 const release = name => { if (RUN.owner === name) RUN.owner = null; };
+// stops and failures the page decides on itself (shown in Data → Bridge log next to the bridge's entries)
+const pageLog = [];
+let blogHtml = "";
+function note(text) {
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  pageLog.push(`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}  [page] ${text}`);
+  if (pageLog.length > 100) pageLog.shift();
+}
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3500); }
 
 // ------------------------------------------------------------ PIN (bridge only)
@@ -167,6 +175,7 @@ $("model").onchange = () => api("/api/model", {model: $("model").value});
 $("modelDemo").onchange = () => api("/api/model", {model: $("modelDemo").value});
 // STOP ends whatever is running (drawing, play, script, live drag) as well as the motion
 function stopAll() {
+  note("STOP pressed");
   api("/api/stop", {});
   playing = false; if (scRun) scRun.aborted = true; setLive(false);
   if (typeof JOB !== "undefined" && JOB.active) JOB.active = false;
@@ -279,18 +288,18 @@ async function playWps() {
       if (!playing) break;
       if (w.grip && !FEAT.gripper) continue;   // gripper switched off in Setup
       const r = await wpMove(w);
-      if (r.errorCode !== "0") { playing = false; break; }
+      if (r.errorCode !== "0") { playing = false; note("waypoint play stopped: move refused: " + (r.errorMsg || r.errorCode)); break; }
       if (w.grip) continue;   // its own wait already ran; the pause is between moves
       await sleep(250);
       // the real cobot's "in position" comes from its status stream: if that drops, stop rather than wait forever
       let lost = 0;
       while (playing && S.inpos === false) {
         lost = S.mode === "real" && !S.stream_ok ? lost + 50 : 0;
-        if (lost > 3000) { playing = false; api("/api/stop", {}); toast("Play stopped: lost the status feed from the cobot"); break; }
+        if (lost > 3000) { playing = false; api("/api/stop", {}); toast("Play stopped: lost the status feed from the cobot"); note("waypoint play stopped: lost the status feed"); break; }
         await sleep(50);
       }
       // stop the loop on any fault (e-stop, protective stop, disabled)
-      if (S.estop || S.protective_stop || S.enabled === false) { playing = false; toast("Play stopped: robot not ready"); break; }
+      if (S.estop || S.protective_stop || S.enabled === false) { playing = false; toast("Play stopped: robot not ready"); note(`waypoint play stopped: E-stop ${!!S.estop}, protective stop ${!!S.protective_stop}, enabled ${S.enabled}`); break; }
       const dwell = Math.max(0, +$("dwell").value || 0);
       if (playing && dwell) await sleep(dwell * 1000);
     }
@@ -444,6 +453,7 @@ $("tcpCalc").onclick = () => {
 
 // ------------------------------------------------------------ data recording (CSV)
 let rec = null;   // {rows, t0}
+$("blogSave").onclick = () => download(`bridge-log-${stamp()}.txt`, [...(S.bridge_log || []), ...pageLog].sort().join("\n"), "text/plain");
 $("recBtn").onclick = () => {
   if (rec && rec.on) { rec.on = false; $("recBtn").textContent = "● Record"; $("recBtn").classList.remove("on"); $("recSave").disabled = !rec.rows.length; return; }
   rec = {on: true, rows: [], t0: Date.now()}; $("recBtn").textContent = "■ Stop"; $("recBtn").classList.add("on"); $("recSave").disabled = true;
@@ -779,6 +789,10 @@ function render() {
     for (const [sl, lab] of [["speed", "speedV"], ["speed2", "speedV2"]])
       if (document.activeElement !== $(sl)) { $(sl).value = eff; $(lab).textContent = eff + "%"; }
   }
+  // bridge log + the page's own stop reasons (drawing, live drag, play), newest first
+  const blog = [...(S.bridge_log || []), ...pageLog].sort().reverse();
+  const bh = blog.map(l => `<div${/FAILED|ERROR|refused|stopped|dead-man|lost/.test(l) ? ' style="color:#ffb4b6"' : ""}>${String(l).replace(/</g, "&lt;")}</div>`).join("");
+  if (bh !== blogHtml) $("blog").innerHTML = blogHtml = bh;
   if (S.log) $("log").innerHTML = S.log.slice().reverse().map(l => `<div>${String(l).replace(/</g, "&lt;")}</div>`).join("");
   for (const sel of ["model", "modelDemo"])
     if (S.model && $(sel).value !== S.model && document.activeElement !== $(sel)) $(sel).value = S.model;
@@ -1188,7 +1202,7 @@ async function follow() {
       if (d < 0.5 || !target.ok || (failed && d3(goal, failed) < 1)) { if (!dragging) break; await sleep(40); continue; }
       const step = d > 100 ? add(here, mul(sub(goal, here), 100 / d)) : goal;
       const r = await api("/api/cmd", {cmdName: "moveL", relFlag: 0, cartPosition: [...step, ...target.pose.slice(3)], speed: lspeed(), accel: 1000});
-      if (!okR(r)) { failed = goal; continue; }
+      if (!okR(r)) { failed = goal; note("live drag step refused: " + (r.errorMsg || r.errorCode)); continue; }
       failed = null;
       // wait until it is there, or has stopped short (a limit, a fault)
       const t0 = Date.now();
@@ -1200,7 +1214,7 @@ async function follow() {
         if (S.inpos !== false && (d3(S.tcp, step) < 1 || (moved && t > 100) || t > 1500)) break;
         if (t > 15000 || !live) break;
       }
-      if (S.estop || S.protective_stop || S.errcode || S.enabled === false) { setLive(false); toast("Live drag off: the robot stopped (fault or not enabled)"); break; }
+      if (S.estop || S.protective_stop || S.errcode || S.enabled === false) { setLive(false); toast("Live drag off: the robot stopped (fault or not enabled)"); note(`live drag off: E-stop ${!!S.estop}, protective stop ${!!S.protective_stop}, error ${S.errcode || 0}, enabled ${S.enabled}`); break; }
     }
   } finally {
     following = false;
