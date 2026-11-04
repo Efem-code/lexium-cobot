@@ -22,6 +22,7 @@ this protocol wrapped in TLS 1.3 with a self-signed "LXM_Cobot" cert.
 Plain TCP connects but gets no data. The simulator stays plain TCP.
 """
 import json
+import re
 import socket
 import socketserver
 import ssl
@@ -62,6 +63,9 @@ def detect_tls(host, port, timeout=2.0):
         return False
 
 
+_JSON_MARKS = re.compile(r'[{}"\\]')
+
+
 class JsonStream:
     """Splits a TCP byte stream into JSON objects by brace counting."""
 
@@ -71,14 +75,17 @@ class JsonStream:
     def feed(self, data):
         self.buf += data.decode("utf-8", "replace")
         out = []
-        depth, start, in_str, esc = 0, None, False, False
+        depth, start, in_str, esc = 0, None, False, -1
         consumed = 0
-        for i, ch in enumerate(self.buf):
+        # only braces, quotes and backslashes matter: jumping between them keeps up with the cobot's
+        # status stream (a per-character Python loop fell behind it, so the bridge's state lagged the arm)
+        for m in _JSON_MARKS.finditer(self.buf):
+            i, ch = m.start(), m.group()
             if in_str:
-                if esc:
-                    esc = False
-                elif ch == "\\":
-                    esc = True
+                if i == esc:          # the character right after a backslash is escaped
+                    continue
+                if ch == "\\":
+                    esc = i + 1
                 elif ch == '"':
                     in_str = False
                 continue

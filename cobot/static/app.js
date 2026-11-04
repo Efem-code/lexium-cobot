@@ -746,8 +746,8 @@ $("scStop").onclick = () => { if (scRun) scRun.aborted = true; api("/api/stop", 
 // ------------------------------------------------------------ status rendering
 let shownMode = null;
 function pill(id, cls, txt) { const p = $(id); p.className = "pill " + cls; if (txt) p.textContent = txt; }
+let logHtml = "";
 function render() {
-  recSample();
   const P = S.ports || {};
   pill("pMode", S.connected ? "ok" : "bad", S.mode === "demo" ? "DEMO" : S.connected ? (S.mode === "sim" ? "SIMULATOR" : "REAL " + S.host) : (S.bridge_down ? "bridge offline" : "offline"));
   // Modbus is optional on the real cobot when the (TLS) status stream is up
@@ -793,7 +793,7 @@ function render() {
   const blog = [...(S.bridge_log || []), ...pageLog].sort().reverse();
   const bh = blog.map(l => `<div${/FAILED|ERROR|refused|stopped|dead-man|lost/.test(l) ? ' style="color:#ffb4b6"' : ""}>${String(l).replace(/</g, "&lt;")}</div>`).join("");
   if (bh !== blogHtml) $("blog").innerHTML = blogHtml = bh;
-  if (S.log) $("log").innerHTML = S.log.slice().reverse().map(l => `<div>${String(l).replace(/</g, "&lt;")}</div>`).join("");
+  if (S.log) { const lh = S.log.slice().reverse().map(l => `<div>${String(l).replace(/</g, "&lt;")}</div>`).join(""); if (lh !== logHtml) $("log").innerHTML = logHtml = lh; }
   for (const sel of ["model", "modelDemo"])
     if (S.model && $(sel).value !== S.model && document.activeElement !== $(sel)) $(sel).value = S.model;
   if (S.model && S.model !== fittedModel && profiles[S.model]) fitCamera(profiles[S.model].reach);
@@ -1251,7 +1251,13 @@ for (const [k, id] of Object.entries(FEAT_IDS)) $(id).onchange = e => {
     for (const [k, v] of Object.entries(profiles)) { const o = document.createElement("option"); o.value = k; o.textContent = v.name; $(sel).appendChild(o); }
   buildJog(); drawWps(); applyFeatures();
   limits.forEach(([lo, hi], i) => { $("js" + i).min = lo; $("js" + i).max = hi; });
-  T.subscribe(s => { S = s; render(); });
+  // S is updated on every status message (moves wait on it), but the page is redrawn at most once per frame:
+  // redrawing per message let messages queue up behind a slow redraw, so S (and the arm) ran seconds behind
+  let renderQueued = false;
+  T.subscribe(s => {
+    S = s; recSample();
+    if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; render(); }); }
+  });
   setTimeout(syncSliders, 600);
   requestAnimationFrame(draw);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("sw.js").catch(() => {});
