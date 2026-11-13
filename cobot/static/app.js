@@ -1033,8 +1033,8 @@ function drawFrame(p, R, len, alpha) {
   for (let k = 0; k < 3; k++) { ctx.globalAlpha = alpha; line(p, add(p, [R[0][k] * len, R[1][k] * len, R[2][k] * len]), cols[k], 2); }
   ctx.globalAlpha = 1;
 }
-let tcpScreen = null, targetScreen = null, lastPts = null, lastPtsAsked = false, viewDrop = 0;
-try { viewDrop = Math.max(0, +localStorage.getItem("viewDrop") || 0); } catch (_) {}
+let tcpScreen = null, targetScreen = null, lastPts = null, lastPtsAsked = false, viewDrop = 25;   // default: the cobot sits on a ~25 mm mounting base
+try { const s = localStorage.getItem("viewDrop"); if (s !== null && s !== "") viewDrop = Math.max(0, +s || 0); } catch (_) {}
 $("viewDrop").value = viewDrop || "";
 $("viewDrop").onchange = e => { viewDrop = Math.max(0, Math.min(2000, +e.target.value || 0)); e.target.value = viewDrop || ""; try { localStorage.setItem("viewDrop", viewDrop); } catch (_) {} };
 function draw() {
