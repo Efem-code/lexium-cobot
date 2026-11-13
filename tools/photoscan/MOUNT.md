@@ -49,3 +49,20 @@ dimensional drawing gives these few numbers each:
 - Relative aim: cameras parallel, or both toed-in at the work point ~300 mm out?
 - Cable exit direction.
 - Printer build volume + material (sets wall thickness / whether to split).
+
+## Rev A model (mount_gen.py)
+
+Parametric generator (`mount/mount_gen.py`, trimesh + manifold3d) → `mount.stl`
++ `mount_preview.png`. Robot side is to spec; sensor mounts use the PLACEHOLDER
+values above and are flagged CONFIRM in the code.
+
+- Watertight, ~**141 g** PLA, bounding box **170 × 72 × 21 mm**.
+- Flange disc Ø72 with Ø31.3 locating boss, 4× M6 counterbored bolts on Ø50,
+  Ø6 dowel, Ø16 cable pass-through; wide plate carrying both sensors facing +Z.
+- **SEC110 optical offset ≈ (50, 0, 87) mm** from the flange → this is the
+  `plan.py --tool x,y,z` value once the lens offset is confirmed.
+
+**Rev A caveats:** sensor bolt patterns/envelopes are placeholders; the plate is
+a flat cantilever (ribs/gussets to be added once sensor masses are known — it
+hangs off the wrist); aim is parallel +Z (toe-in is a parameter). Update the
+sensor dicts in `mount_gen.py` from the SICK drawings and re-run.
