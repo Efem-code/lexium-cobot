@@ -1,7 +1,8 @@
 """Lexium Cobot simulator / controller launcher (the `lexium-cobot` command, run.py, the .exe).
 
   lexium-cobot                  simulator + controller UI (auto-connected to the sim)
-  lexium-cobot sim              virtual cobot controller only (Modbus 502, JSON 10001/10000)
+  lexium-cobot sim              virtual cobot controller only (Modbus 502, or 1502 without admin
+                                rights on Linux/macOS; JSON 10001/10000)
   lexium-cobot sim --public     ...listening on all interfaces (so a TM262 PLC can reach it)
   lexium-cobot ui               controller UI only (connect to a sim or real cobot from the page)
   lexium-cobot --lan            ...and let phones/iPads on the same Wi-Fi use it (PIN protected)
@@ -111,13 +112,38 @@ def already_running(port):
         return False
 
 
+MODBUS_PORT = 502
+MODBUS_FALLBACK_PORT = 1502
+
+
+def start_sim(host, a):
+    """Start the simulator and return the Modbus port it got.
+
+    Linux and macOS only let root open ports below 1024, so when the user didn't pick a port
+    and 502 is refused, the simulator uses 1502 instead (point a PLC at that port)."""
+    port = MODBUS_PORT if a.modbus_port is None else a.modbus_port
+    try:
+        VirtualController(host, port, a.cmd_port, a.status_port, a.model).start(ready=True)
+        return port
+    except PermissionError:
+        if a.modbus_port is not None:
+            raise
+    print(f"[sim] this OS doesn't allow port {MODBUS_PORT} without admin rights: "
+          f"using Modbus port {MODBUS_FALLBACK_PORT} instead")
+    VirtualController(host, MODBUS_FALLBACK_PORT, a.cmd_port, a.status_port,
+                      a.model).start(ready=True)
+    return MODBUS_FALLBACK_PORT
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="lexium-cobot", description=__doc__,
                                  formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("what", nargs="?", default="all", choices=["all", "sim", "ui"])
     ap.add_argument("--public", action="store_true", help="sim listens on 0.0.0.0 (for PLC/other PCs)")
     ap.add_argument("--model", default="LXMRL03", choices=list(PROFILES))
-    ap.add_argument("--modbus-port", type=int, default=502)
+    ap.add_argument("--modbus-port", type=int, default=None,
+                    help=f"simulator Modbus TCP port (default {MODBUS_PORT}; "
+                         f"{MODBUS_FALLBACK_PORT} when the OS won't allow {MODBUS_PORT})")
     ap.add_argument("--cmd-port", type=int, default=10001)
     ap.add_argument("--status-port", type=int, default=10000)
     ap.add_argument("--ui-port", type=int, default=8765)
@@ -137,7 +163,7 @@ def main(argv=None):
     if a.what in ("all", "sim"):
         host = "0.0.0.0" if a.public else "127.0.0.1"
         try:
-            VirtualController(host, a.modbus_port, a.cmd_port, a.status_port, a.model).start(ready=True)
+            a.modbus_port = start_sim(host, a)
         except OSError as e:
             raise SystemExit(f"[sim] can't open the simulator ports ({e}). Is the app already running? "
                              "Close it, or start with: lexium-cobot ui")
