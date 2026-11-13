@@ -20,7 +20,7 @@ The page's **Draw** tab plans the drawing, and **Export for TM262** writes it as
    ```bash
    python run.py sim --public
    ```
-   Allow Python through Windows Firewall on ports 502, 10001 and 10000.
+   Allow Python through Windows Firewall on ports 502, 10001 and 10000. (On Linux or macOS without admin rights the simulator uses Modbus port **1502** instead of 502, and says so when it starts.)
 2. **Modbus first** (works today, uses only standard Machine Expert pieces):
    1. In Machine Expert, add a **Modbus TCP IOScanner** (Generic Modbus TCP slave) on the TM262 Ethernet port. Target is the PC IP, unit ID 1.
    2. Add a channel: **FC04, read input registers, start 300, length 180, cyclic 50 ms**. Map it to an `ARRAY[0..179] OF WORD`.
