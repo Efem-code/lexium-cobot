@@ -66,7 +66,10 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 .target{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:none;gap:8px;align-items:center;background:rgba(29,30,32,.96);border:1px solid var(--accent);border-radius:10px;padding:8px 10px;max-width:calc(100% - 20px);flex-wrap:wrap;justify-content:center}
 .target.show{display:flex}
 .feats{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
-body.off-draw #drawCard,body.off-draw #tabs [data-tab=draw],body.off-live #liveDrag,body.off-gripper #gripRow,
+.timrow{display:grid;grid-template-columns:62px repeat(6,minmax(0,1fr)) 26px;gap:4px;align-items:center;margin-bottom:4px}
+.timrow input{width:100%;padding:4px 5px}.timrow input:disabled{opacity:.3}.timrow button{padding:3px 0}
+.timhead{color:var(--mute);font-size:11px;margin-bottom:2px}
+body.off-draw #drawCard,body.off-draw #tabs [data-tab=draw],body.off-scan #scanCard,body.off-scan #tabs [data-tab=scan],body.off-live #liveDrag,body.off-gripper #gripRow,
 body.off-script #scriptCard,body.off-script #tabs [data-tab=script],body.off-script #wpToScript,body.off-programs #progCard{display:none!important}
 .livebtn{position:absolute;right:12px;top:10px;background:rgba(38,40,44,.92)}
 .livebtn.on{background:var(--accent2);border-color:var(--accent);font-weight:700}
@@ -184,7 +187,7 @@ body.display .dispbanner.show{display:block}
   </div>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="draw">Draw</button><button data-tab="script">Script</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
+    <button data-tab="jog" class="sel">Jog</button><button data-tab="robot">Robot</button><button data-tab="points">Points</button><button data-tab="draw">Draw</button><button data-tab="scan">Scan</button><button data-tab="script">Script</button><button data-tab="data">Data</button><button data-tab="setup">Setup</button>
   </nav>
 
   <!-- LEFT -->
@@ -274,12 +277,13 @@ body.display .dispbanner.show{display:block}
         <div class="cfgh">Features <span class="note" style="margin:0">(switch off what you don't use)</span></div>
         <div class="feats">
           <label class="row"><input type="checkbox" id="ftDraw"> Draw (G-code)</label>
+          <label class="row"><input type="checkbox" id="ftScan"> Scan (TiM, simulated)</label>
           <label class="row"><input type="checkbox" id="ftLive"> Live drag</label>
           <label class="row"><input type="checkbox" id="ftGrip"> Gripper steps</label>
           <label class="row"><input type="checkbox" id="ftScript"> Script</label>
           <label class="row"><input type="checkbox" id="ftProg"> Programs on the cobot</label>
         </div>
-        <div class="note" style="margin:0">Only one thing moves the arm at a time: while a drawing, waypoint play, a script or live drag runs, the others, jog and the Go buttons wait. <b>STOP</b> (or Esc) ends whichever is running.</div>
+        <div class="note" style="margin:0">Only one thing moves the arm at a time: while a drawing, a scan pass, waypoint play, a script or live drag runs, the others, jog and the Go buttons wait. <b>STOP</b> (or Esc) ends whichever is running.</div>
 
         <div class="cfgh">Safety <span class="note" style="margin:0">(view only; change in Cobot Expert)</span></div>
         <div class="light">Collision sensitivity: <b id="clsn" style="color:var(--text)">—</b></div>
@@ -429,6 +433,54 @@ body.display .dispbanner.show{display:block}
           <b>Export for TM262</b> saves the same path as Structured Text for Machine Expert (a point list the PLC runs with MoveL).</div>
       </details>
     </div>
+    <div class="card" data-tab="scan" id="scanCard">
+      <div class="row" style="justify-content:space-between"><h2>Scan (SICK TiM, simulated)</h2>
+        <div class="row"><button id="sRun" class="primary">Scan</button><button id="sStop" class="danger">Stop</button></div></div>
+      <div class="row" style="color:var(--mute)"><label class="row"><input type="checkbox" id="sMount"> scanner on the flange</label>
+        <label class="row"><input type="checkbox" id="sFree"> record while jogging</label></div>
+      <div class="note" id="sInfo"></div>
+      <div class="mono" id="sProg" style="margin-top:4px;color:var(--accent)"></div>
+
+      <div class="cfgh">Result</div>
+      <div class="note" id="sResult" style="margin-top:0"></div>
+      <div class="row" style="color:var(--mute);margin-top:6px">Show: <label class="row"><input type="checkbox" id="sShowItems"> items</label>
+        <label class="row"><input type="checkbox" id="sShowCloud"> point cloud</label><label class="row"><input type="checkbox" id="sShowBelt"> belt points</label></div>
+      <div class="row" style="margin-top:6px"><button id="sClear">Clear scan</button><button id="sPly">Export PLY</button><button id="sCsv">Export CSV</button></div>
+
+      <div class="cfgh">Pass <span class="note" style="margin:0">(the arm carries the scanner, like a belt carries the items)</span></div>
+      <div class="grid4">
+        <label class="f">Start X mm<input id="sSX" inputmode="decimal"></label>
+        <label class="f">Start Y mm<input id="sSY" inputmode="decimal"></label>
+        <label class="f">Direction °<input id="sDir" inputmode="decimal"></label>
+        <label class="f">Length mm<input id="sLen" inputmode="decimal"></label>
+        <label class="f">Height mm<input id="sHt" inputmode="decimal"></label>
+        <label class="f">Belt speed mm/s<input id="sSpd" inputmode="decimal"></label>
+        <label class="f">Belt surface Z<input id="sBelt" inputmode="decimal"></label>
+        <label class="f">Belt width mm<input id="sBeltW" inputmode="decimal"></label>
+        <div style="align-self:end"><button id="sHere" title="Start X/Y = where the scanner is now">Start = here</button></div>
+      </div>
+
+      <div class="cfgh">Scanner</div>
+      <div class="grid4">
+        <label class="f">Field of view °<input id="sFov" inputmode="decimal"></label>
+        <label class="f">Resolution °<input id="sRes" inputmode="decimal"></label>
+        <label class="f">Scan rate Hz<input id="sRate" inputmode="decimal"></label>
+        <label class="f">Range mm<input id="sRange" inputmode="decimal"></label>
+        <label class="f">Noise mm (1σ)<input id="sNoise" inputmode="decimal"></label>
+      </div>
+
+      <div class="cfgh">Items on the belt <span class="note" style="margin:0">(mm, base frame)</span></div>
+      <div id="sItems"></div>
+      <div class="row"><button id="sAddBox">+ Box</button><button id="sAddCyl">+ Cylinder</button><button id="sAddBall">+ Ball</button><button id="sSample">Sample load</button></div>
+      <details class="calib"><summary>How it works</summary>
+        <div class="note" style="margin-top:4px">
+          On a belt, the scanner stands still and the items move under it. Here the items stand still and the arm moves the scanner over them in a straight line at the <b>belt speed</b>: the result is the same.<br>
+          The scanner is a SICK TiM 2D LiDAR (270° fan, 15 lines/s) mounted hood down, with its fan across the pass, looking down from <b>Height</b> above the belt surface. It takes <b>Scan rate</b> lines a second; each line is placed with the arm's live pose, so the lines build a 3D point cloud, coloured by height.<br>
+          Volume = the cross-section of each line × the distance travelled between lines, added up (the same sum a belt volume scanner does with area × belt speed). Faster passes give fewer lines; a lower <b>Resolution</b> gives more beams per line.<br>
+          The scanner and items are simulated. In the simulator, <i>scanner on the flange</i> also makes tool slot 1 the scanner's optical centre (70 mm) and the payload 0.25 kg. With the real cobot only the picture changes: set its tool and payload yourself.<br>
+          <b>Export PLY</b> opens in CloudCompare, MeshLab or Blender; <b>CSV</b> has one row per point.</div>
+      </details>
+    </div>
     <div class="card" data-tab="data">
       <h2>Digital I/O</h2>
       <div style="color:var(--mute);font-size:11px;margin-bottom:4px">DO 0–15 (tap to toggle)</div>
@@ -460,5 +512,6 @@ body.display .dispbanner.show{display:block}
 <script src="sim.js"></script>
 <script src="app.js"></script>
 <script src="draw.js"></script>
+<script src="scan.js"></script>
 </body>
 </html>

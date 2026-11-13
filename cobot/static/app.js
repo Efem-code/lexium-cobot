@@ -51,10 +51,10 @@ const cmd = (name, extra = {}) => api("/api/cmd", Object.assign({cmdName: name},
 // ------------------------------------------------------------ features + one mover at a time
 // Features can be switched off in Setup (hidden, and they can't move the arm). Drawing, waypoint play, a script
 // and live drag each own the arm while they run: jog, Go buttons and the other features wait until it ends.
-const FEAT = {draw: true, live: true, gripper: true, script: true, programs: true};
+const FEAT = {draw: true, scan: true, live: true, gripper: true, script: true, programs: true};
 try { Object.assign(FEAT, JSON.parse(localStorage.getItem("features") || "{}")); } catch (_) {}
 const RUN = {owner: null};
-const OWNER = {draw: "A drawing", play: "Waypoint play", script: "A script", live: "Live drag"};
+const OWNER = {draw: "A drawing", scan: "A scan pass", play: "Waypoint play", script: "A script", live: "Live drag"};
 function busy(name) {
   if (RUN.owner && RUN.owner !== name) { toast(`${OWNER[RUN.owner]} is running: stop it first${RUN.owner === "live" ? " (Live drag button)" : " (STOP)"}`); return true; }
   if (typeof P !== "undefined" && P.state === "running") { toast("A program is running on the cobot: stop it first"); return true; }
@@ -179,6 +179,7 @@ function stopAll() {
   api("/api/stop", {});
   playing = false; if (scRun) scRun.aborted = true; setLive(false);
   if (typeof JOB !== "undefined" && JOB.active) JOB.active = false;
+  if (typeof TIMJOB !== "undefined" && TIMJOB.active) TIMJOB.active = false;
 }
 $("btnStop").onclick = stopAll;
 $("bPower").onclick = () => cmd("power_on");
@@ -1068,11 +1069,13 @@ function draw() {
   } else { ctx.fillStyle = "#2e3034"; poly(ring(95, 0, 32)); ctx.fill(); }
   drawFrame([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 200, .9);
   if (typeof drawPaper === "function" && FEAT.draw) drawPaper();   // Draw tab: paper, drawing and ink (draw.js)
+  if (typeof drawTimScene === "function" && FEAT.scan) drawTimScene();   // Scan tab: items and point cloud (scan.js)
   if (ghost) drawArm(ghost.points, .35, true);
   // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
   if (S.points) lastPts = S.points;
   else if (!lastPts && !lastPtsAsked) { lastPtsAsked = true; api("/api/fk", {joints: [0, 90, -90, 90, 90, 0]}).then(r => { if (r.points && !lastPts) lastPts = r.points; }).catch(() => { lastPtsAsked = false; }); }
   drawArm(S.points || lastPts, S.points ? 1 : .3, false, !!S.points);
+  if (typeof drawTimScanner === "function" && FEAT.scan && S.points) drawTimScanner();   // scanner body + laser fan
   const feedLost = S.mode === "real" && S.connected && !S.stream_ok && !S.modbus_ok;
   // powered off / disabled: every move is refused, so say so where people are looking
   const notReady = S.points && S.connected && !S.estop && (S.powered === false || S.enabled === false);
@@ -1223,12 +1226,13 @@ async function follow() {
 }
 
 // ------------------------------------------------------------ feature switches (Setup)
-const FEAT_IDS = {draw: "ftDraw", live: "ftLive", gripper: "ftGrip", script: "ftScript", programs: "ftProg"};
+const FEAT_IDS = {draw: "ftDraw", scan: "ftScan", live: "ftLive", gripper: "ftGrip", script: "ftScript", programs: "ftProg"};
 function applyFeatures() {
   for (const [k, id] of Object.entries(FEAT_IDS)) { $(id).checked = FEAT[k]; document.body.classList.toggle("off-" + k, !FEAT[k]); }
   // a feature switched off while it runs is stopped
   if (!FEAT.live && live) setLive(false);
   if (!FEAT.draw && typeof JOB !== "undefined" && JOB.active) { JOB.active = false; api("/api/stop", {}); }
+  if (!FEAT.scan && typeof TIMJOB !== "undefined" && TIMJOB.active) { TIMJOB.active = false; api("/api/stop", {}); }
   if (!FEAT.script && scRun) { scRun.aborted = true; api("/api/stop", {}); }
   // phones: if the open tab was just hidden, go back to Jog
   const sel = document.querySelector("#tabs button.sel");
@@ -1256,6 +1260,7 @@ for (const [k, id] of Object.entries(FEAT_IDS)) $(id).onchange = e => {
   let renderQueued = false;
   T.subscribe(s => {
     S = s; recSample();
+    if (typeof timFeed === "function") timFeed(s);
     if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; render(); }); }
   });
   setTimeout(syncSliders, 600);
