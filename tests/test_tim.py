@@ -77,6 +77,36 @@ r = TimReader(); r.connect("127.0.0.1", 1, "auto")
 check("nothing listening: error, no crash", wait(lambda: "Error" in r.status()["error"] or "refused" in r.status()["error"].lower(), 5), r.status()["error"])
 r.disconnect()
 
+# ---- review fixes
+import socket  # noqa: E402
+
+check("garbled CoLa A telegram: None, no exception", parse_cola_a("sSN LMDscandata " + "zz " * 40) is None and parse_cola_a("sSN LMDscandata 1 2 3") is None)
+from cobot.tim import TimReader as _TR  # noqa: E402
+good = telegram_b(1, dist)
+bad = good[:-1] + bytes([good[-1] ^ 0xFF])
+rest, scans, framed = _TR._split(bad + good, "B")
+check("CoLa B: a frame with a wrong checksum is dropped, the next one kept", len(scans) == 1 and scans[0]["counter"] == 1)
+
+r = TimReader(); r.disconnect()
+t0 = time.time(); n = 0
+while time.time() - t0 < 0.5:
+    r.wait_scan(r.seq, 0.1); n += 1
+check("after disconnect, wait_scan waits instead of spinning", n <= 6, f"{n} calls in 0.5 s")
+
+# reconnect from a scanner that never answers to a working one: the old thread must not mark the new one disconnected
+silent = socket.socket(); silent.bind(("127.0.0.1", 0)); silent.listen(4)
+fake = FakeTim(proto="B")
+r = TimReader()
+r.connect("127.0.0.1", silent.getsockname()[1], "B")
+time.sleep(0.5)
+t0 = time.time()
+r.connect("127.0.0.1", fake.port, "B")
+check("reconnect returns quickly (blocked recv is woken)", time.time() - t0 < 1.0, f"{time.time() - t0:.2f} s")
+time.sleep(6.5)   # longer than the old session's 5 s timeout
+st = r.status()
+check("after the old session times out, the new one is still connected", st["connected"] and st["rate"] > 10, st)
+r.disconnect(); fake.close(); silent.close()
+
 # ---- bridge endpoints
 from cobot.web import Handler, serve  # noqa: E402
 

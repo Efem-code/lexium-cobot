@@ -38,7 +38,7 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 | 8 | M3 × 8 nylon-tipped set screws | pinch the TiM in the cradle: snug, not tight (the TiM's housing is plastic too) |
 | 2 | M4 heat-set inserts (Ø5.6 hole) | plate, for the camera bracket |
 | 2 | M4 × 16 socket head | camera bracket to the plate |
-| 2 | M4 × 8 socket head + washers | SEC110 to its bracket (about 4 mm into the camera: check its thread depth) |
+| 2 | M4 × 6 socket head | SEC110 to its bracket: heads in 2 mm counterbores, 3 mm into the camera. Use M4 × 8 only if the camera's threads are deeper than 5 mm (the datasheet doesn't say). |
 | 2 | **right-angle** M12 cables | SEC110: Ethernet (4-pin D-coded) and power/I/O (4-pin A-coded). There is 34 mm above the camera. |
 | 2 | M12 cables | TiM: they leave through the window in the cradle's end wall |
 
@@ -47,7 +47,7 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 1. Press the heat-set inserts in: eight M3 in the cradle walls, two M4 from the top of the plate.
 2. Fit the dowel and bolt the bracket to the flange. The bolt heads are only reachable before the TiM goes in.
 3. Slide the TiM into the cradle base-first along −X, with its front face on the lip and its connectors through the end-wall window. Snug the eight set screws evenly.
-4. Screw the SEC110 to the camera bracket, then bolt the bracket under the plate. Plug in the right-angle cables.
+4. Bolt the camera bracket under the plate first (M4 × 16 from below: the camera would cover these heads). Then hold the SEC110 under it and screw it on through the camera plate from above with a short hex key, reaching in from the side. Plug in the right-angle cables.
 5. In the app: Scan tab → **scanner on the flange**. In the simulator that sets tool slot 1 (Z 62.5) and the 0.5 kg payload. On the real cobot, enter them in Setup → Tool and Payload.
 
 ## Check before trusting it
@@ -56,7 +56,7 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 - **TiM grip:** the cradle holds the first 36 mm of the TiM's body, with windows over its M3 mounting recesses. Check that it's stiff enough at the speeds you use. `cradle_len` changes the length; it must stay below about 48 mm, where the TiM's hood begins.
 - **TiM side faces:** the datasheet drawing shows a 0.7 mm step on the lower housing. The set screws take up the difference, but if the TiM rocks in the cradle, check the clearance (`clr`).
 - **Camera focus:** the SEC110's working distance starts at **0.3 m**. Its lens sits about 14 mm lower than the TiM's scan origin, so the Scan tab's default pass height of 330 mm keeps the belt just over 0.3 m away. Don't scan lower than about 320 mm if you need the camera image. The L03 reaches a 330 mm pass at X 250–340 mm.
-- **Not confirmed:** the SEC110 M4 thread depth, and where the arm's M8 tool connector sits around the flange (it's on the side of joint 6, and the plate stays within 36 mm of the axis at Y).
+- **Not confirmed:** the SEC110 M4 thread depth (hence M4 × 6), and where the arm's M8 tool connector sits around the flange (it's on the side of joint 6, and the plate stays within 36 mm of the axis at Y).
 
 ## Collision checks
 

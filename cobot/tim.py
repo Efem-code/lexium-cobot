@@ -35,8 +35,14 @@ def _float32(tok):
 
 
 def parse_cola_a(msg):
-    """One 'sRA/sSN LMDscandata ...' telegram (text between STX and ETX) -> scan dict, or None."""
-    t = msg.split()
+    """One 'sRA/sSN LMDscandata ...' telegram (text between STX and ETX) -> scan dict, or None (also if garbled)."""
+    try:
+        return _parse_cola_a(msg.split())
+    except (ValueError, IndexError, struct.error):
+        return None
+
+
+def _parse_cola_a(t):
     if len(t) < 20 or t[0] not in ("sRA", "sSN") or t[1] != "LMDscandata":
         return None
     i = 2 + 3                                   # version, device number, serial number
@@ -107,6 +113,7 @@ class TimReader:
     def __init__(self):
         self.lock = threading.Lock()
         self.cond = threading.Condition(self.lock)
+        self.ctl = threading.Lock()   # one connect/disconnect at a time
         self.host, self.port, self.proto = None, 2111, "auto"
         self.used = None
         self.sock = None
@@ -121,18 +128,29 @@ class TimReader:
 
     # -- control
     def connect(self, host, port=2111, proto="auto"):
-        self.disconnect()
-        self.host, self.port, self.proto = str(host), int(port), (proto or "auto")
-        self.stop_ev = threading.Event()
-        self.error, self.used = "", None
-        self.thread = threading.Thread(target=self._run, args=(self.stop_ev,), daemon=True, name="tim")
-        self.thread.start()
+        with self.ctl:
+            self._disconnect()
+            stop = threading.Event()
+            with self.lock:
+                self.host, self.port, self.proto = str(host), int(port), (proto or "auto")
+                self.stop_ev, self.error, self.used = stop, "", None
+            self.thread = threading.Thread(target=self._run, args=(stop,), daemon=True, name="tim")
+            self.thread.start()
         return self.status()
 
     def disconnect(self):
+        with self.ctl:
+            self._disconnect()
+        return {"ok": True}
+
+    def _disconnect(self):
         self.stop_ev.set()
         s = self.sock
         if s:
+            try:
+                s.shutdown(socket.SHUT_RDWR)   # wakes a recv() blocked in the reader thread at once
+            except OSError:
+                pass
             try:
                 s.close()
             except OSError:
@@ -143,7 +161,10 @@ class TimReader:
         with self.lock:
             self.connected = False
             self.rate = 0.0
-        return {"ok": True}
+
+    def _mine(self, stop):
+        """True while `stop` belongs to the current session (an old thread must not touch the new one's state)."""
+        return stop is self.stop_ev and not stop.is_set()
 
     def status(self):
         with self.lock:
@@ -155,7 +176,7 @@ class TimReader:
     def wait_scan(self, after_seq, timeout=1.0):
         """Block until a scan newer than after_seq arrives (or timeout); returns it or None."""
         with self.cond:
-            self.cond.wait_for(lambda: self.seq > after_seq or self.stop_ev.is_set(), timeout)
+            self.cond.wait_for(lambda: self.seq > after_seq, timeout)
             return dict(self.scan) if self.scan and self.seq > after_seq else None
 
     # -- worker
@@ -168,20 +189,27 @@ class TimReader:
                     if self._session(proto, stop, probe=self.proto == "auto"):
                         break
                 else:
-                    if not stop.is_set() and not self.error:
-                        self.error = "no scan data from the scanner on either protocol (CoLa A or B)"
-            except OSError as e:
-                if not stop.is_set():
-                    self.error = f"{type(e).__name__}: {e}"
+                    with self.lock:
+                        if self._mine(stop) and not self.error:
+                            self.error = "no scan data from the scanner on either protocol (CoLa A or B)"
+            except Exception as e:   # OSError, but also anything unexpected: report it and retry, never die silently
+                with self.lock:
+                    if self._mine(stop):
+                        self.error = f"{type(e).__name__}: {e}"
             with self.lock:
-                self.connected = False
+                if self._mine(stop):
+                    self.connected = False
             stop.wait(2.0)   # retry
 
     def _session(self, proto, stop, probe):
         """Connect, start the stream and read scans until stopped. False = no answer in this protocol (probe)."""
         s = socket.create_connection((self.host, self.port), timeout=3)
         s.settimeout(1.5 if probe else 5)
-        self.sock = s
+        with self.lock:
+            if not self._mine(stop):   # disconnected while connecting
+                s.close()
+                return True
+            self.sock = s
         buf = b""
         try:
             s.sendall(frame_b(b"sEN LMDscandata \x01") if proto == "B" else STX + b"sEN LMDscandata 1" + ETX)
@@ -191,7 +219,7 @@ class TimReader:
                     chunk = s.recv(65536)
                 except socket.timeout:
                     if not got_any:
-                        return False if probe else self._fail("no answer from the scanner")
+                        return False if probe else self._fail(stop, "no answer from the scanner")
                     raise
                 if not chunk:
                     raise ConnectionError("scanner closed the connection")
@@ -202,10 +230,11 @@ class TimReader:
                 if framed and not got_any:
                     got_any = True
                     with self.lock:
-                        self.connected, self.used, self.error = True, proto, ""
+                        if self._mine(stop):
+                            self.connected, self.used, self.error = True, proto, ""
                     s.settimeout(5)
                 for sc in scans:
-                    self._store(sc)
+                    self._store(sc, stop)
             return True
         finally:
             try:
@@ -213,8 +242,10 @@ class TimReader:
             except OSError:
                 pass
 
-    def _fail(self, msg):
-        self.error = msg
+    def _fail(self, stop, msg):
+        with self.lock:
+            if self._mine(stop):
+                self.error = msg
         return True
 
     @staticmethod
@@ -234,8 +265,13 @@ class TimReader:
                     continue
                 if len(buf) < k + 8 + n + 1:
                     return buf[k:], scans, framed
-                payload = buf[k + 8:k + 8 + n]
+                payload, cs = buf[k + 8:k + 8 + n], buf[k + 8 + n]
                 buf = buf[k + 9 + n:]
+                x = 0
+                for v in payload:
+                    x ^= v
+                if x != cs:                # corrupted frame: drop it
+                    continue
                 framed = True
                 sc = parse_cola_b(payload)
                 if sc:
@@ -254,9 +290,11 @@ class TimReader:
             if sc:
                 scans.append(sc)
 
-    def _store(self, sc):
+    def _store(self, sc, stop):
         now = time.time()
         with self.cond:
+            if not self._mine(stop):
+                return
             self.seq += 1
             sc["t"], sc["seq"] = now, self.seq
             self.scan = sc

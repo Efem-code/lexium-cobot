@@ -137,7 +137,8 @@ module camera_bracket() {
     for (s = [-1, 1]) translate([cam_x, s * (cam_w / 2 - 2), pt - 1]) { cylinder(d = 4.4, h = 60); translate([0, 0, 12]) cylinder(d = 8, h = 60); }
     cam_place() {
       // M4 screws into the camera's back: 30 mm apart, 12 mm from its bottom edge
-      for (s = [-1, 1]) translate([12 - cam_h / 2, s * 15, -cam_pt - 1]) { cylinder(d = 4.4, h = cam_pt + 2); translate([0, 0, cam_pt - 1]) cylinder(d = 8, h = 3); }
+      // (heads on the plate's top face, in 2 mm counterbores: 3 mm of plate under the head, so M4 x 6 = 3 mm in the camera)
+      for (s = [-1, 1]) translate([12 - cam_h / 2, s * 15, -cam_pt - 1]) { cylinder(d = 4.4, h = cam_pt + 2); cylinder(d = 8, h = 3); }
       // window for the two M12 connectors (22.4 apart, 33.9 from the bottom edge)
       translate([33.9 - cam_h / 2 - 10, -22, -cam_pt - 1]) cube([cam_h - 33.9 + 10 + 1, 44, cam_pt + 2]);
     }

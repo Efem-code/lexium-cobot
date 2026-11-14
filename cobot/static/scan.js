@@ -47,6 +47,9 @@ const timSave = () => { try { localStorage.setItem("tim", JSON.stringify({...TIM
 // the recorded scan: one entry per scan line
 let timLines = [];        // {o: [x,y,z] scanner, ex: travel axis, pts: Float32Array xyz of hits, h: Float32Array heights, area}
 let timVol = 0, timTravel = 0, timPoints = 0, timMaxH = 0;
+// volume bookkeeping: progress is measured along the first direction the scanner moved (across its scan plane);
+// only ground not scanned yet adds volume, so jogging back and forth doesn't count it twice
+let timRef = null, timFront = 0, timLastArea = 0;
 const TIM_MAX_POINTS = 400000;
 const TIM_BIN = 5;          // mm: width of the bins across the belt for the cross-section
 
@@ -235,15 +238,21 @@ function timAddLine(sc) {
     area += v * cw;
   }
   const line = {o: sc.o, ex: sc.ex, pts: new Float32Array(pts), h: new Float32Array(hs), area};
-  const last = timLines[timLines.length - 1];
-  if (last) {
-    // distance travelled along the scan direction (across the scan plane) since the last line
-    const dt = Math.abs(dot(sub(sc.o, last.o), sc.ex));
-    if (dt < 50) { timVol += (area + last.area) / 2 * dt; timTravel += dt; }
+  if (!timRef) { timRef = {o: sc.o, ex: sc.ex, sign: 0}; timFront = 0; timLastArea = area; }
+  else {
+    const along = dot(sub(sc.o, timRef.o), timRef.ex);
+    if (!timRef.sign && Math.abs(along) > 0.5) timRef.sign = Math.sign(along);
+    const prog = along * (timRef.sign || 1), inc = prog - timFront;
+    if (inc > 0) {
+      // a gap much larger than the line spacing is a jump (recording paused, a fast jog): no volume across it
+      const gap = Math.max(150, 4 * TIM.speed / Math.max(1, TIM.rate));
+      if (inc < gap) { timVol += (area + timLastArea) / 2 * inc; timTravel += inc; }
+      timFront = prog; timLastArea = area;
+    }
   }
   timLines.push(line); timPoints += hs.length;
 }
-function timClear() { timLines = []; timVol = timTravel = timPoints = timMaxH = 0; timTick.full = false; timShow(); }
+function timClear() { timLines = []; timVol = timTravel = timPoints = timMaxH = timFront = timLastArea = 0; timRef = null; timTick.full = false; timShow(); }
 
 // ------------------------------------------------------------ the pass as robot moves
 // desired scanner pose → TCP pose for the active tool: flange = optical centre - L along flange Z; TCP = flange + Rf·tool
@@ -325,10 +334,23 @@ const timMsg = t => { $("sProg").textContent = t; };
 
 // scanner on/off: in the simulator it also becomes tool slot 1 (optical centre) with its weight as payload
 async function timMount(on) {
+  const was = TIM.mounted;
   TIM.mounted = on; $("sMount").checked = on; timSave();
-  if (!on) { timShow(); return; }
+  if (!on) {
+    // simulator: put back the tool and payload that were active before the scanner went on
+    if (was && TIM.prev && S.mode !== "real") {
+      await cmd("set_tool_id", {tool_id: TIM.prev.toolId});
+      if (TIM.prev.payload) await cmd("set_payload", TIM.prev.payload);
+      readCfg().catch(() => {});
+    }
+    TIM.prev = null; timSave(); timShow(); return;
+  }
   if (GRIP.model) { $("gModel").value = ""; saveGrip(); }   // one thing on the flange at a time
   if (S.mode === "real") { toast("Virtual scanner shown on the real arm: its tool and payload are not changed"); timShow(); return; }
+  if (!was) {
+    const pl = await cmd("get_payload");
+    TIM.prev = {toolId: S.tool_id ?? 0, payload: okR(pl) ? {mass: pl.mass, centroid: pl.centroid} : null}; timSave();
+  }
   const rs = [await cmd("set_tool_offsets", {id: 1, tooloffset: [0, 0, TIM_BODY.L, 0, 0, 0], name: "TiM scanner"}),
               await cmd("set_tool_id", {tool_id: 1}),
               await cmd("set_payload", {mass: TIM_BODY.mass, centroid: [0, 0, TIM_BODY.com]})];
