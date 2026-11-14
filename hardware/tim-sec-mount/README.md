@@ -71,11 +71,11 @@ Those are the only two printed parts. Everything else is bought hardware: see [H
 The profiles are in `print/`. To slice again after a change, from this folder:
 
 ```bash
-BambuStudio.AppImage --load-settings "machine.json;print/process_strong_mount_A1M.json" --load-filaments print/filament_PETG_A1M_lowfan.json \
+BambuStudio.AppImage --load-settings "print/machine_A1mini_0.4.json;print/process_strong_mount_A1M.json" --load-filaments print/filament_PETG_A1M_lowfan.json \
   --load-assemble-list print/assemble.json --curr-bed-type "Textured PEI Plate" --slice 0 --export-3mf print/tim_sec_mount_A1mini_PETG.3mf
 ```
 
-`machine.json` is the Bambu Lab A1 mini 0.4 nozzle system profile, with its `inherits` chain merged into one file.
+The three profile files in `print/` are Bambu's system profiles with their `inherits` chains merged into one file each.
 
 ## Fit test: print it first
 
