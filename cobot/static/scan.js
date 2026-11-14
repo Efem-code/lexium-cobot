@@ -21,13 +21,16 @@ const TIM = {
 };
 // The printed mount in hardware/tim-sec-mount: the TiM lies on its side under a plate on the flange, hood axis along
 // flange X, front (90° beam) down, so its scan plane is the flange's Y-Z plane. The scan origin is L mm out from the
-// flange face. Mass = TiM 0.25 kg + SEC110 camera 0.12 kg + printed bracket and screws (about 0.13 kg).
-const TIM_BODY = {L: 62.5, mass: 0.5, com: 45};
+// flange face. Mass = TiM 0.25 kg + SEC110 camera 0.12 kg + the one-piece printed mount (about 0.28 kg) + screws;
+// centre of mass in the flange frame (mm), from hardware/tim-sec-mount/analysis.
+const TIM_BODY = {L: 62.5, mass: 0.68, com: [7, 0, 44]};
 // shapes for the 3D view, in the flange frame (mm): centre [x, y, z] and half sizes, from tim_sec_mount.scad
 const TIM_MOUNT = [
-  {c: [9.8, 0, 5], h: [78.7, 35.4, 5], col: [232, 100, 42]},          // plate on the flange
-  {c: [-47.2, 0, 54.2], h: [20.7, 35.4, 44.2], col: [214, 92, 38]},   // cradle around the TiM's base end (36 mm)
+  {c: [13.3, 0, 6], h: [82.2, 36.4, 6], col: [232, 100, 42]},         // plate on the flange
+  {c: [-42.7, 0, 55.2], h: [26.2, 36.4, 43.2], col: [214, 92, 38]},   // cradle round the TiM's body (46 mm)
   {c: [-33.2, 0, 62.5], h: [29.2, 30, 30.5], col: [70, 74, 82]},      // TiM body
+  {c: [65.7, 0, 30], h: [29.8, 34.8, 18], col: [214, 92, 38]},        // camera block (same printed part)
+  {c: [63.7, 0, 62.2], h: [24.5, 28.8, 16.8], col: [60, 110, 160]},   // SEC110 camera
 ];
 let timItems = null;
 try {
@@ -353,7 +356,7 @@ async function timMount(on) {
   }
   const rs = [await cmd("set_tool_offsets", {id: 1, tooloffset: [0, 0, TIM_BODY.L, 0, 0, 0], name: "TiM scanner"}),
               await cmd("set_tool_id", {tool_id: 1}),
-              await cmd("set_payload", {mass: TIM_BODY.mass, centroid: [0, 0, TIM_BODY.com]})];
+              await cmd("set_payload", {mass: TIM_BODY.mass, centroid: TIM_BODY.com})];
   readCfg().catch(() => {});
   if (!rs.every(okR)) toast("Simulator didn't accept the scanner tool: " + (rs.find(r => !okR(r)).errorMsg || "error"));
   // the pass is planned from S.tool: wait until the status feed reports the new tool
