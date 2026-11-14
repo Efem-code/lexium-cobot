@@ -34,8 +34,8 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 |---|---|---|
 | 4 | M6 × 12 socket head + washers | bracket to the flange (counterbored, 6 mm in the plastic). About 4 Nm, not the 11 Nm rated for metal tools. |
 | 1 | Ø6 × 16 dowel pin | in the pin hole: 7 mm in the plate, 9 mm in the flange. It sets the rotation. |
-| 4 | M3 heat-set inserts (Ø4.0 hole) | cradle side walls |
-| 4 | M3 × 8 nylon-tipped set screws | pinch the TiM in the cradle |
+| 8 | M3 heat-set inserts (Ø4.0 hole) | cradle side walls, 4 per side |
+| 8 | M3 × 8 nylon-tipped set screws | pinch the TiM in the cradle: snug, not tight (the TiM's housing is plastic too) |
 | 2 | M4 heat-set inserts (Ø5.6 hole) | plate, for the camera bracket |
 | 2 | M4 × 16 socket head | camera bracket to the plate |
 | 2 | M4 × 8 socket head + washers | SEC110 to its bracket (about 4 mm into the camera: check its thread depth) |
@@ -44,18 +44,37 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 
 ## Assembly
 
-1. Press the heat-set inserts in: four M3 in the cradle walls, two M4 from the top of the plate.
+1. Press the heat-set inserts in: eight M3 in the cradle walls, two M4 from the top of the plate.
 2. Fit the dowel and bolt the bracket to the flange. The bolt heads are only reachable before the TiM goes in.
-3. Slide the TiM into the cradle base-first along −X, with its front face on the lip and its connectors through the end-wall window. Snug the four set screws.
+3. Slide the TiM into the cradle base-first along −X, with its front face on the lip and its connectors through the end-wall window. Snug the eight set screws evenly.
 4. Screw the SEC110 to the camera bracket, then bolt the bracket under the plate. Plug in the right-angle cables.
 5. In the app: Scan tab → **scanner on the flange**. In the simulator that sets tool slot 1 (Z 62.5) and the 0.5 kg payload. On the real cobot, enter them in Setup → Tool and Payload.
 
 ## Check before trusting it
 
 - **Fan direction:** the bolt pattern is symmetric, so it doesn't say which way the robot's own tool X points. After mounting, jog in Tool X and check the arm moves along the TiM's hood axis. If not, add the difference to the pass **Direction**, or turn the tool frame.
-- **TiM grip:** the cradle holds only the TiM's base end, the first 20 mm, so it stays clear of the M3 recesses at 24.4 mm. Check it's stiff enough at the speeds you use. `cradle_len` lengthens it, and a strap around the body at about X −25 would stiffen it without touching the fan.
-- **Camera focus:** the SEC110's working distance starts at **0.3 m**. At the default pass height (200 mm), the belt is only about 0.2 m from the lens. Raise the pass, or increase `cam_drop` and `cam_tilt`.
+- **TiM grip:** the cradle holds the first 36 mm of the TiM's body, with windows over its M3 mounting recesses. Check that it's stiff enough at the speeds you use. `cradle_len` changes the length; it must stay below about 48 mm, where the TiM's hood begins.
+- **TiM side faces:** the datasheet drawing shows a 0.7 mm step on the lower housing. The set screws take up the difference, but if the TiM rocks in the cradle, check the clearance (`clr`).
+- **Camera focus:** the SEC110's working distance starts at **0.3 m**. Its lens sits about 14 mm lower than the TiM's scan origin, so the Scan tab's default pass height of 330 mm keeps the belt just over 0.3 m away. Don't scan lower than about 320 mm if you need the camera image. The L03 reaches a 330 mm pass at X 250–340 mm.
 - **Not confirmed:** the SEC110 M4 thread depth, and where the arm's M8 tool connector sits around the flange (it's on the side of joint 6, and the plate stays within 36 mm of the axis at Y).
+
+## Collision checks
+
+The .scad file has check parts that intersect two things that must never touch. Each must come out empty (OpenSCAD then says *Current top level object is empty*):
+
+| Check | What must not touch |
+|---|---|
+| `check_tim` | the bracket and the TiM (body, hood, connector unit and straight M12 plugs) |
+| `check_cam_body`, `check_cam_plugs` | the brackets and the camera body, or its right-angle M12 plugs |
+| `check_cam_tim` | the camera and the TiM |
+| `check_brackets` | the bracket and the camera bracket |
+| `check_fan` | anything printed, or the camera, inside the TiM's 270° fan |
+
+All six were empty for the files in `stl/` (14 Nov 2026). Run them again after any change:
+
+```bash
+for p in check_tim check_cam_body check_cam_plugs check_cam_tim check_brackets check_fan; do openscad --backend=manifold -D "part=\"$p\"" -o /tmp/$p.stl tim_sec_mount.scad 2>&1 | grep -q -i empty && echo "$p ok" || echo "$p COLLISION"; done
+```
 
 ## Change it
 

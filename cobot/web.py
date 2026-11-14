@@ -14,6 +14,9 @@ POST /api/jog/stop
 POST /api/stop
 POST /api/ik           {pose, seed}
 POST /api/model        {model}
+POST /api/tim/connect  {host, port, proto}   SICK TiM 2D LiDAR (proto "auto", "A" or "B")
+POST /api/tim/disconnect
+GET  /api/tim/stream   Server-Sent Events: {state, scan} for every new scan (scan = null when none came in 1 s)
 """
 import hmac
 import json
@@ -25,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import kinematics as K
 from .driver import CobotDriver, to_json
+from .tim import TimReader
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -61,6 +65,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     share = None                        # set by cli: share("status"|"on"|"off") -> dict
+    tim = TimReader()                   # SICK TiM on the arm (Scan tab)
 
     def _local(self):
         return self.client_address[0] in ("127.0.0.1", "::1")
@@ -141,6 +146,23 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(0.05)
             except OSError:
                 return
+        if self.path == "/api/tim/stream":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            seq = self.tim.seq
+            try:
+                while True:
+                    sc = self.tim.wait_scan(seq, timeout=1.0)
+                    if sc:
+                        seq = sc["seq"]
+                    self.wfile.write(("data: " + to_json({"state": self.tim.status(), "scan": sc}) + "\n\n").encode())
+                    self.wfile.flush()
+            except OSError:
+                return
         self._send(404, '{"error":"not found"}')
 
     def do_POST(self):
@@ -199,6 +221,10 @@ class Handler(BaseHTTPRequestHandler):
                 r = {"tcp": d.arm.fk(q), "points": d.arm.joint_points(q)}
             elif p == "/api/model":
                 r = d.set_model(body["model"])
+            elif p == "/api/tim/connect":
+                r = self.tim.connect(body.get("host") or "192.168.0.1", int(body.get("port") or 2111), body.get("proto") or "auto")
+            elif p == "/api/tim/disconnect":
+                r = self.tim.disconnect()
             else:
                 return self._json({"error": "not found"}, 404)
             return self._json(r)

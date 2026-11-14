@@ -41,7 +41,8 @@ tim_conn_below = 15.37;     // connector unit below the base (101.12 - 85.75)
 tim_conn_behind = 17.37;    // connector unit behind the back face
 tim_conn_from_back = 14.3;  // connector unit reaches this far into the body from the back (61 - 46.71)
 gap = 22;                   // plate underside to TiM back face: room for the connector unit
-cradle_len = 20;            // how far along the TiM body the cradle grips (stays clear of the M3 side recesses at 24.4)
+cradle_len = 36;            // how far along the TiM body the cradle grips; windows clear its M3 side recesses at 24.4
+tim_recess = [24.4, 33];    // TiM M3 mounting recess on each side: height above the base, distance from the back
 wall = 5;
 
 /* [SEC110] */
@@ -103,17 +104,17 @@ module cradle() {
     union() {
       for (s = [-1, 1]) translate([x0, s > 0 ? y_in : -y_in - wall, z_top]) cube([x1 - x0, wall, z_bot - z_top]);   // side walls
       translate([x0, -y_in - wall, z_top]) cube([wall, 2 * (y_in + wall), z_bot - z_top]);                          // base wall
-      // front lip, chamfered so it prints without support
-      translate([x0, -y_in, tim_front_z + clr]) hull() {
-        cube([wall + 12, 2 * y_in, wall]);
-        cube([wall, 2 * y_in, 0.01]);
-      }
+      // front lip under the TiM's front face: prints as a bridge between the two side walls
+      translate([x0, -y_in, tim_front_z + clr]) cube([wall + 12, 2 * y_in, wall]);
     }
     // window in the base wall for the connector unit and its plugs
     translate([x0 - 1, -23, tim_back_z - tim_conn_behind - 2]) cube([wall + 2, 46, tim_conn_behind + tim_conn_from_back + 4]);
-    // M3 heat-set inserts (Ø4.0, 6 deep) for nylon-tipped set screws that pinch the TiM
-    for (s = [-1, 1], z = [tim_back_z + 18, tim_front_z - 18])
-      translate([tim_base_x + cradle_len / 2, s * (y_in + wall / 2), z]) rotate([90, 0, 0]) cylinder(d = 4.0, h = wall + 2, center = true);
+    // M3 heat-set inserts (Ø4.0) for nylon-tipped set screws that pinch the TiM: two near the base, two further along
+    for (s = [-1, 1], x = [tim_base_x + 10, tim_base_x + cradle_len - 5], z = [tim_back_z + 15, tim_front_z - 15])
+      translate([x, s * (y_in + wall / 2), z]) rotate([90, 0, 0]) cylinder(d = 4.0, h = wall + 2, center = true);
+    // windows over the TiM's M3 mounting recesses (and the straight plates, if they are fitted)
+    for (s = [-1, 1]) translate([tim_base_x + tim_recess[0] - 8, s > 0 ? y_in - 1 : -y_in - wall - 1, tim_back_z + tim_recess[1] - 10])
+      cube([16, wall + 2, 20]);
   }
 }
 
@@ -175,7 +176,35 @@ module cam_dummy() {
 }
 module flange_dummy() { color("Silver") translate([0, 0, -30]) cylinder(d = fl_d, h = 30); }
 
-if (part == "bracket") bracket();
+// ------------------------------------------------------------------ collision checks: each must render EMPTY
+// (openscad -D 'part="check_tim"' -o /tmp/x.stl tim_sec_mount.scad  ->  "Current top level object is empty")
+module tim_solid() {   // body, hood and connector unit, without the clearance
+  translate([tim_base_x, -tim_w / 2, tim_back_z]) cube([tim_h - 27.3, tim_w, tim_d]);
+  translate([tim_base_x + tim_h - 27.3, 0, optical_z]) rotate([0, 90, 0]) cylinder(d = 50, h = 27.3);
+  translate([tim_base_x - tim_conn_below, -18, tim_back_z - tim_conn_behind]) cube([tim_conn_below + 10, 36, tim_conn_behind + tim_conn_from_back]);
+  // straight M12 plugs out of the connector unit, along -X (about 50 mm with the cable bend)
+  for (s = [-1, 1]) translate([tim_base_x - tim_conn_below, s * 9, tim_back_z - 6]) rotate([0, -90, 0]) cylinder(d = 16, h = 50);
+}
+// body + right-angle M12 plugs going up from its back (about 32 mm to the top of the plug); `gap` pulls the body
+// off its plate so faces that only touch don't count
+module cam_solid(body = true, plugs = true, gap = 0.1) {
+  cam_place() {
+    if (body) translate([-cam_h / 2, -cam_w / 2, gap]) cube([cam_h, cam_w, cam_d]);
+    if (plugs) for (s = [-1, 1]) translate([33.9 - cam_h / 2, s * 11.2, -32]) cylinder(d = 16, h = 32);
+  }
+}
+// the TiM's 270° fan (not its 90° blind sector, which faces the arm), 1 mm thick, 500 mm out
+module fan_solid() {
+  translate([-0.5, 0, optical_z]) rotate([0, 90, 0]) linear_extrude(1) polygon([[0, 0], for (a = [-45:5:225]) 500 * [-sin(a), cos(a)]]);
+}
+
+if (part == "check_tim") intersection() { bracket(); tim_solid(); }
+else if (part == "check_cam_body") intersection() { union() { bracket(); camera_bracket(); } cam_solid(plugs = false); }
+else if (part == "check_cam_plugs") intersection() { union() { bracket(); camera_bracket(); } cam_solid(body = false); }
+else if (part == "check_cam_tim") intersection() { cam_solid(); tim_solid(); }
+else if (part == "check_brackets") intersection() { bracket(); translate([0, 0, 0.1]) camera_bracket(); }
+else if (part == "check_fan") intersection() { union() { bracket(); camera_bracket(); cam_solid(); } fan_solid(); }
+else if (part == "bracket") bracket();
 else if (part == "camera_bracket") rotate([90, 0, 0]) camera_bracket();   // printed on its side: the profile is extruded along Y
 else if (part == "fit_test") fit_test();
 // assembly view: turned so the arm is up and the belt is down

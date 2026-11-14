@@ -1,4 +1,4 @@
-// Scan tab: a simulated SICK TiM 2D LiDAR on the flange. The arm carries the scanner in a straight line
+// Scan tab: a SICK TiM 2D LiDAR on the flange, simulated or real (read by the bridge, cobot/tim.py). The arm carries the scanner in a straight line
 // over items standing still on the table: the same as items riding a belt under a fixed scanner. Each scan line is
 // placed with the arm's live pose, so the lines build a 3D point cloud; the cross-section of every line times the
 // distance travelled gives the volume (the same sum as a belt volume scanner).
@@ -10,10 +10,13 @@
 // ------------------------------------------------------------ settings (remembered on this device)
 const TIM = {
   mounted: false, free: false,
+  // where the scans come from: "sim" (ray-cast here) or "real" (a TiM read by the bridge at host:port)
+  source: "sim", host: "192.168.0.1", port: 2111, flip: false, lag: 0,
   // scanner: a 2D LiDAR fan in the plane of the flange's Y and Z axes, looking along flange Z (down)
   fov: 270, res: 0.33, rate: 15, range: 10000, noise: 1,
-  // the pass: the scanner's optical centre moves in a straight line, `height` above the belt surface
-  sx: 340, sy: -180, dir: 90, len: 360, height: 200, speed: 100, beltZ: 0, beltW: 400,
+  // the pass: the scanner's optical centre moves in a straight line, `height` above the belt surface (330 mm keeps
+  // the belt at least 0.3 m from the SEC110's lens: its shortest working distance)
+  sx: 340, sy: -180, dir: 90, len: 360, height: 330, speed: 100, beltZ: 0, beltW: 400,
   show: {items: true, cloud: true, belt: true},
 };
 // The printed mount in hardware/tim-sec-mount: the TiM lies on its side under a plate on the flange, hood axis along
@@ -23,7 +26,7 @@ const TIM_BODY = {L: 62.5, mass: 0.5, com: 45};
 // shapes for the 3D view, in the flange frame (mm): centre [x, y, z] and half sizes, from tim_sec_mount.scad
 const TIM_MOUNT = [
   {c: [9.8, 0, 5], h: [78.7, 35.4, 5], col: [232, 100, 42]},          // plate on the flange
-  {c: [-55.2, 0, 54.2], h: [12.7, 35.4, 44.2], col: [214, 92, 38]},   // cradle around the TiM's base end
+  {c: [-47.2, 0, 54.2], h: [20.7, 35.4, 44.2], col: [214, 92, 38]},   // cradle around the TiM's base end (36 mm)
   {c: [-33.2, 0, 62.5], h: [29.2, 30, 30.5], col: [70, 74, 82]},      // TiM body
 ];
 let timItems = null;
@@ -123,6 +126,48 @@ function timCast(fl, Rf, noisy) {
   return {o, ex, ey, hits};
 }
 
+// A real scan (bridge /api/tim/stream: start angle, step, ranges in mm, 0 = no echo) placed at a flange pose.
+// TiM angles: 90° is out of its front face. On the printed mount the front points along flange Z (down) and the
+// hood along flange X, which makes angle a the direction cos(a)·Y + sin(a)·Z; "flip" mirrors it (if the mount is
+// turned the other way round).
+function timRealCast(scan, fl, Rf) {
+  const ex = [Rf[0][0], Rf[1][0], Rf[2][0]], ey = [Rf[0][1], Rf[1][1], Rf[2][1]], ez = [Rf[0][2], Rf[1][2], Rf[2][2]];
+  const o = add(fl, mul(ez, TIM_BODY.L)), hits = [], sg = TIM.flip ? -1 : 1;
+  for (let k = 0; k < scan.dist.length; k++) {
+    const r = scan.dist[k];
+    if (!(r > 0 && r < TIM.range)) { hits.push(null); continue; }
+    const a = (scan.start + scan.step * k) * Math.PI / 180;
+    hits.push(add(o, add(mul(ey, sg * Math.cos(a) * r), mul(ez, Math.sin(a) * r))));
+  }
+  return {o, ex, ey, hits};
+}
+const TIMREAL = {es: null, state: null, last: null, lastT: 0};
+function timRealOpen() {
+  if (DEMO || TIMREAL.es) return;
+  const es = new EventSource("api/tim/stream");
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data); TIMREAL.state = m.state;
+    if (m.scan) { TIMREAL.last = m.scan; TIMREAL.lastT = performance.now(); timRealScan(m.scan); }
+  };
+  es.onerror = () => { es.close(); TIMREAL.es = null; if (TIM.source === "real") setTimeout(timRealOpen, 2000); };
+  TIMREAL.es = es;
+}
+function timRealClose() { if (TIMREAL.es) { TIMREAL.es.close(); TIMREAL.es = null; } }
+function timRealScan(scan) {
+  if (TIM.source !== "real" || !FEAT.scan || !TIM.mounted || !(TIMJOB.recording || TIM.free) || scan.error) return;
+  if (timFull()) return;
+  // the scan was taken a little before it arrived: use the pose from then (TIM.lag adds the scanner's own delay)
+  const p = timPoseAt(performance.now() - 80 - TIM.lag); if (!p) return;
+  const sc = timRealCast(scan, p.fl, p.Rf), last = timLines[timLines.length - 1];
+  if (last && Math.hypot(...sub(sc.o, last.o)) < 0.2) return;
+  timAddLine(sc);
+}
+function timFull() {
+  if (timPoints < TIM_MAX_POINTS) return false;
+  if (!timTick.full) { timTick.full = true; toast("Scan memory full (400 000 points): Clear scan to record more"); }
+  return true;
+}
+
 // flange position + rotation from a status message (rotation = TCP rotation with the active tool's rotation taken out)
 function timFlange(s) {
   if (!s || !s.tcp || !s.points || s.points.length !== 8) return null;
@@ -153,11 +198,8 @@ function timRestartTimer() {
   timTimer = setInterval(timTick, 1000 / Math.max(1, Math.min(100, TIM.rate)));
 }
 function timTick() {
-  if (!FEAT.scan || !TIM.mounted || !(TIMJOB.recording || TIM.free)) return;
-  if (timPoints >= TIM_MAX_POINTS) {
-    if (!timTick.full) { timTick.full = true; toast("Scan memory full (400 000 points): Clear scan to record more"); }
-    return;
-  }
+  if (TIM.source !== "sim" || !FEAT.scan || !TIM.mounted || !(TIMJOB.recording || TIM.free)) return;
+  if (timFull()) return;
   const p = timPoseAt(performance.now() - 80); if (!p) return;
   const last = timLines[timLines.length - 1];
   const sc = timCast(p.fl, p.Rf, true);
@@ -246,6 +288,7 @@ $("sRun").onclick = async () => {
   if (!S.connected || !S.tcp) { toast("Not connected"); return; }
   if (S.errcode) { toast("Clear the controller error first (Robot tab → Clear error)"); return; }
   if (!TIM.mounted) { await timMount(true); }
+  if (TIM.source === "real" && !(TIMREAL.state && TIMREAL.state.connected)) { timMsg("The real TiM isn't sending scans: Connect it under Scanner first"); return; }
   const [p0, p1] = timEnds(), c0 = timTcpFor(p0), c1 = timTcpFor(p1);
   const zMin = (S.limits || {}).z_min;
   if (zMin != null && Math.min(c0[2], c1[2]) < zMin) { timMsg(`The pass is below the floor limit (${zMin} mm): raise Height or lower the floor limit in Setup`); return; }
@@ -255,7 +298,7 @@ $("sRun").onclick = async () => {
     if (!r.joints || !r.ok) { timMsg(`The ${["start", "end", "middle"][i]} of the pass is out of reach: move it closer to the arm, lower Height or shorten Length`); return; }
     if (i === 0) q0 = r.joints;
   }
-  if (S.mode === "real" && !confirm(`Run the scan pass with the REAL arm?\n\nThe scanner and the items are simulated, but the arm moves: ${TIM.len} mm straight line at ${TIM.speed} mm/s (the speed limit still applies), ${TIM.height} mm above the belt surface. Area clear, E-stop in reach.`)) return;
+  if (S.mode === "real" && !confirm(`Run the scan pass with the REAL arm?\n\n${TIM.source === "real" ? "The real TiM records" : "The scanner and the items are simulated, but the arm moves"}: ${TIM.len} mm straight line at ${TIM.speed} mm/s (the speed limit still applies), ${TIM.height} mm above the belt surface. Area clear, E-stop in reach.`)) return;
   if (!FEAT.scan || !claim("scan")) return;
   TIMJOB.active = true;
   $("sRun").disabled = true;
@@ -296,6 +339,29 @@ async function timMount(on) {
   timShow();
 }
 $("sMount").onchange = e => timMount(e.target.checked);
+// scanner source: simulated, or the real TiM through the bridge
+function timSource(src) {
+  TIM.source = src === "real" && !DEMO ? "real" : "sim"; timSave();
+  if (TIM.source === "real") timRealOpen(); else timRealClose();
+  timShow();
+}
+$("sSrc").onchange = e => timSource(e.target.value);
+$("sTimConn").onclick = async () => {
+  TIM.host = $("sHost").value.trim() || TIM.host; TIM.port = +$("sPort").value || 2111; timSave();
+  const r = await api("/api/tim/connect", {host: TIM.host, port: TIM.port, proto: "auto"});
+  if (!r.errorCode) { TIMREAL.state = r; timSource("real"); }
+};
+$("sTimDisc").onclick = async () => { await api("/api/tim/disconnect", {}); TIMREAL.state = null; timShow(); };
+$("sFlip").onchange = e => { TIM.flip = e.target.checked; timSave(); };
+$("sLag").onchange = e => { TIM.lag = Math.max(0, Math.min(500, +e.target.value || 0)); timSave(); timShow(); };
+function timRealText() {
+  if (DEMO) return "Real TiM: needs the app on a PC (the bridge reads the scanner), not the browser demo.";
+  const st = TIMREAL.state;
+  if (!st || !st.host) return "Real TiM: not connected. Default address 192.168.0.1 port 2111 (put the PC on the TiM's subnet).";
+  if (st.connected) return `Real TiM ${st.host}:${st.port}: <b style="color:var(--ok)">${st.rate} scans/s</b>, CoLa ${st.proto}, ${st.scans.toLocaleString()} scans`;
+  return `Real TiM ${st.host}:${st.port}: <b style="color:var(--warn)">${st.running ? "connecting…" : "stopped"}</b>${st.error ? " " + st.error : ""}`;
+}
+setInterval(() => { if (TIM.source === "real") $("sTimSt").innerHTML = timRealText(); }, 500);
 $("sFree").onchange = e => { TIM.free = e.target.checked; timSave(); };
 $("sClear").onclick = timClear;
 $("sHere").onclick = () => {
@@ -319,7 +385,7 @@ for (const [id, k, lo, hi] of TIM_FIELDS) $(id).onchange = () => {
 const TIM_KINDS = {box: "Box", cyl: "Cylinder", ball: "Ball"};
 function timItemsHtml() {
   const esc = v => +(+v || 0).toFixed(1);
-  $("sItems").innerHTML = timItems.length ? `<div class="timrow timhead"><span></span><span>X</span><span>Y</span><span>L / Ø</span><span>W</span><span>H</span><span>turn°</span><span></span></div>` +
+  $("sItems").innerHTML = timItems.length ? `<div class="timrow timhead"><span>X</span><span>Y</span><span>L / Ø</span><span>W</span><span>H</span><span>turn°</span><span></span></div>` +
     timItems.map((it, i) => `<div class="timrow" data-i="${i}"><b>${TIM_KINDS[it.type]}</b>` +
       ["x", "y", "a", "b", "h", "rot"].map(k => {
         const off = (k === "b" || k === "rot") && it.type !== "box" || k === "h" && it.type === "ball";
@@ -350,6 +416,11 @@ const cm3 = v => v >= 1e6 ? `${(v / 1e6).toFixed(2)} L` : `${(v / 1000).toFixed(
 function timShow() {
   for (const [id, k] of TIM_FIELDS) if (document.activeElement !== $(id)) $(id).value = +(+TIM[k]).toFixed(2);
   $("sMount").checked = TIM.mounted; $("sFree").checked = TIM.free;
+  $("sSrc").value = TIM.source; $("sFlip").checked = TIM.flip; $("sTimSt").innerHTML = timRealText();
+  if (document.activeElement !== $("sHost")) $("sHost").value = TIM.host;
+  if (document.activeElement !== $("sPort")) $("sPort").value = TIM.port;
+  if (document.activeElement !== $("sLag")) $("sLag").value = TIM.lag;
+  document.body.classList.toggle("tim-real", TIM.source === "real");
   $("sShowItems").checked = TIM.show.items; $("sShowCloud").checked = TIM.show.cloud; $("sShowBelt").checked = TIM.show.belt;
   const beams = Math.round(TIM.fov / TIM.res) + 1, spacing = TIM.speed / TIM.rate, width = 2 * timHalfWidth();
   const lateral = TIM.height * TIM.res * Math.PI / 180;
@@ -357,9 +428,9 @@ function timShow() {
     ` along the pass and the beams about ${lateral.toFixed(1)} mm apart across it, over a ${width.toFixed(0)} mm wide strip of belt.` +
     (TIM.mounted ? "" : ` <b style="color:var(--warn)">Tick "scanner on the flange" (Scan does it for you).</b>`);
   if (!timLines.length) { $("sResult").innerHTML = "No scan yet: press <b>Scan</b>, or tick <i>record while jogging</i> and jog over the items."; return; }
-  const tv = timTrueVol(), err = tv > 0 ? ` (${timVol >= tv ? "+" : ""}${((timVol / tv - 1) * 100).toFixed(1)} %)` : "";
+  const tv = TIM.source === "sim" ? timTrueVol() : 0, err = tv > 0 ? ` (${timVol >= tv ? "+" : ""}${((timVol / tv - 1) * 100).toFixed(1)} %)` : "";
   $("sResult").innerHTML = `${timLines.length} lines, ${timPoints.toLocaleString()} points over ${timTravel.toFixed(0)} mm. Highest point ${timMaxH.toFixed(1)} mm above the belt.<br>` +
-    `Volume on the belt: <b style="color:var(--text)">${cm3(timVol)}</b> measured, ${cm3(tv)} true${err}.` +
+    `Volume on the belt: <b style="color:var(--text)">${cm3(timVol)}</b> measured` + (tv > 0 ? `, ${cm3(tv)} true${err}` : "") + "." +
     ` <span style="color:var(--mute)">Overhangs (the lower half of a ball) look solid from above, and items outside the strip aren't seen.</span>`;
 }
 setInterval(() => { if (TIMJOB.recording || TIM.free) timShow(); }, 500);
@@ -369,7 +440,7 @@ $("sPly").onclick = () => {
   if (!timPoints) { toast("Nothing scanned yet"); return; }
   const rows = [];
   for (const l of timLines) for (let i = 0; i < l.h.length; i++) rows.push(`${l.pts[3 * i].toFixed(2)} ${l.pts[3 * i + 1].toFixed(2)} ${l.pts[3 * i + 2].toFixed(2)}`);
-  const head = `ply\nformat ascii 1.0\ncomment Lexium Cobot simulated TiM scan, ${new Date().toISOString().slice(0, 16)}, base frame mm, belt at Z ${TIM.beltZ}\nelement vertex ${rows.length}\nproperty float x\nproperty float y\nproperty float z\nend_header\n`;
+  const head = `ply\nformat ascii 1.0\ncomment Lexium Cobot ${TIM.source === "real" ? "" : "simulated "}TiM scan, ${new Date().toISOString().slice(0, 16)}, base frame mm, belt at Z ${TIM.beltZ}\nelement vertex ${rows.length}\nproperty float x\nproperty float y\nproperty float z\nend_header\n`;
   download(`scan-${stamp()}.ply`, head + rows.join("\n") + "\n", "text/plain");
 };
 $("sCsv").onclick = () => {
@@ -397,7 +468,7 @@ function drawTimScene() {
     const P = proj(p1);   // end of the pass
     if (P) { ctx.fillStyle = "rgba(232,100,42,.8)"; ctx.beginPath(); ctx.arc(P[0], P[1], 4, 0, 7); ctx.fill(); }
   }
-  if (TIM.show.items) {
+  if (TIM.show.items && TIM.source === "sim") {
     const items = timItems.map(it => ({it, z: (proj([it.x, it.y, zb + (it.h || it.a) / 2]) || [0, 0, 0])[2]})).sort((u, v) => v.z - u.z);
     ctx.globalAlpha = timLines.length && TIM.show.cloud ? .45 : .95;
     for (const {it} of items) {
@@ -442,7 +513,8 @@ function drawTimScanner() {
   if (!TIM.mounted) return;
   const f = timFlange(S); if (!f) return;
   const {fl, Rf} = f, ex = [Rf[0][0], Rf[1][0], Rf[2][0]], ey = [Rf[0][1], Rf[1][1], Rf[2][1]], ez = [Rf[0][2], Rf[1][2], Rf[2][2]];
-  const sc = timCast(fl, Rf, false);
+  const real = TIM.source === "real", fresh = real && TIMREAL.last && performance.now() - TIMREAL.lastT < 1000;
+  const sc = real ? (fresh ? timRealCast(TIMREAL.last, fl, Rf) : {o: add(fl, mul(ez, TIM_BODY.L)), hits: []}) : timCast(fl, Rf, false);
   // fan: a few beams as faint lines, and the red laser line where it lands
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,60,60,.16)";
   const O = proj(sc.o);
@@ -467,4 +539,6 @@ function drawTimScanner() {
   for (const p of parts) p.draw();
 }
 
+if (DEMO) TIM.source = "sim";
 timItemsHtml(); timShow(); timRestartTimer();
+if (TIM.source === "real") timRealOpen();
