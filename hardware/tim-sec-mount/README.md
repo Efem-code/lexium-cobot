@@ -51,6 +51,32 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 - **Bridges:** the only unsupported spans are the strap slot (9 mm), the ledges (6 mm, held on two sides) and small hole ceilings. They print without supports.
 - **Holes:** they are drawn to size. If your printer prints holes small, ream the Ø6 pin hole and drill out the M6 holes.
 
+## Ready-to-print project (Bambu Lab A1 mini)
+
+[print/tim_sec_mount_A1mini_PETG.3mf](print/tim_sec_mount_A1mini_PETG.3mf) is a sliced Bambu Studio project with two plates. Print them in order:
+
+| Plate | Part | Time | PETG |
+|---|---|---|---|
+| 1 | `fit_test.stl`: check the holes and the TiM width on the real arm first | 47 min | 18 g |
+| 2 | `mount.stl`: the one-piece mount, flange face on the bed | 10 h 21 min | 245 g |
+
+Those are the only two printed parts. Everything else is bought hardware: see [Hardware](#hardware).
+
+**Settings:**
+- Bambu Lab A1 mini, 0.4 mm nozzle, textured PEI plate.
+- Bambu PETG Basic at 245 °C, bed at 70 °C.
+- 0.20 mm layers, 6 walls, 5 top and bottom layers, 50 % gyroid infill, no supports.
+- Part fan lowered to 15–30 % so the layers bond better.
+
+The profiles are in `print/`. To slice again after a change, from this folder:
+
+```bash
+BambuStudio.AppImage --load-settings "machine.json;print/process_strong_mount_A1M.json" --load-filaments print/filament_PETG_A1M_lowfan.json \
+  --load-assemble-list print/assemble.json --curr-bed-type "Textured PEI Plate" --slice 0 --export-3mf print/tim_sec_mount_A1mini_PETG.3mf
+```
+
+`machine.json` is the Bambu Lab A1 mini 0.4 nozzle system profile, with its `inherits` chain merged into one file.
+
 ## Fit test: print it first
 
 ![fit test](img/fit_test.png)
