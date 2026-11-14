@@ -146,16 +146,19 @@ module camera_bracket() {
 }
 
 // ------------------------------------------------------------------ fit test: print this first (≈ 20 min)
-// Checks the flange bolt pattern and dowel hole, the counterbores, the M3 and M4 insert holes, and the TiM width.
+// Checks the flange bolt pattern and dowel hole, one M6 head counterbore, the M3 and M4 insert holes, and the TiM width.
+// One piece: the flange ring and the TiM width gauge are joined by a tab.
 module fit_test() {
   difference() {
     union() {
       cylinder(d = 64, h = 5);
+      translate([-10, 29, 0]) cube([20, 8, 5]);   // tab joining the ring and the gauge
       translate([-tim_w / 2 - clr - wall, 36, 0]) cube([tim_w + 2 * clr + 2 * wall, 14, 5]);
       for (s = [-1, 1]) translate([s > 0 ? tim_w / 2 + clr : -tim_w / 2 - clr - wall, 36, 0]) cube([wall, 14, 12]);
     }
     for (a = [0, 90, 180, 270]) rotate(a) translate([fl_pcd / 2, 0, -1]) cylinder(d = fl_bolt, h = 10);
     rotate(45) translate([fl_pcd / 2, 0, -1]) cylinder(d = fl_pin, h = 10);
+    translate([fl_pcd / 2, 0, 2]) cylinder(d = fl_head, h = 10);   // one M6 head counterbore (the bolt hole at +X)
     translate([0, 0, -1]) cylinder(d = 32, h = 10);   // see the arm's centring recess through it
     translate([-12, 25, -1]) cylinder(d = 4.0, h = 10);   // M3 insert
     translate([12, 25, -1]) cylinder(d = 5.6, h = 10);    // M4 insert

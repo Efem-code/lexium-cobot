@@ -28,6 +28,25 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 - **Settings:** 0.2 mm layers, 4 walls, 40 % gyroid infill.
 - **Holes:** they are drawn to size. If your printer prints holes small, ream the Ø6 pin hole and drill out the M6 holes.
 
+## Fit test: print it first
+
+![fit test](img/fit_test.png)
+
+A 5 mm ring with the bracket's flange holes, plus a 12 mm high gauge as wide as the TiM cradle. It uses the same values as the bracket, so if it fits, the bracket's flange end fits. Print it in the same material and settings you'll use for the bracket, then check:
+
+| Check | Pass |
+|---|---|
+| Lay the ring on the flange, Ø6 dowel in the pin hole | all four M6 holes line up with the flange's threads; the dowel goes in by hand (snug, no wobble) |
+| Screw in four M6 screws | they go in without forcing the ring sideways |
+| M6 head in the counterbore (the hole with the step) | the head drops in and sits flat |
+| Look through the Ø32 centre hole | the flange's centring recess shows evenly all round (the ring is centred) |
+| Press the M3 insert (small hole) and the M4 insert (larger hole) in | they go in straight and hold |
+| Slide the TiM between the gauge's two walls | it slides in with a little play (0.4 mm a side); the set screws take that up |
+
+If a hole is tight, change `fl_bolt`, `fl_pin` or the insert sizes; if the TiM is tight or loose, change `clr`. Then export again and reprint the fit test before the bracket.
+
+The fit test can't check where the arm's tool X axis points, or the TiM's grip along its length: see *Check before trusting it* below.
+
 ## Hardware
 
 | Qty | Part | Where |
