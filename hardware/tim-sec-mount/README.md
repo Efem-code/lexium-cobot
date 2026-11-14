@@ -8,6 +8,10 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 
 ![assembly](img/assembly.png)
 
+| From the camera end | From below (belt side) |
+|---|---|
+| ![back](img/assembly_back.png) | ![below](img/assembly_below.png) |
+
 **How the TiM sits:**
 - It lies **on its side**: hood axis along the flange's X axis (the direction of travel), front face down at the belt, connectors up towards the arm.
 - A TiM scans in the plane at right angles to its hood axis, so this makes the 270° fan stand **across the belt**, through the flange axis.
