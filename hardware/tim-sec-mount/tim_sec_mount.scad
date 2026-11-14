@@ -205,11 +205,11 @@ module tim_solid() {   // body, hood and connector unit, without the clearance
 module tim_plugs() {   // straight M12 plugs out of the connector unit, along -X (about 50 mm with the cable bend)
   for (s = [-1, 1]) translate([tim_base_x - tim_conn_below, s * 9, tim_back_z - 6]) rotate([0, -90, 0]) cylinder(d = 16, h = 50);
 }
-module tim_dummy() {
+module tim_dummy(fan = true) {
   color("DimGray") translate([tim_base_x, -tim_w / 2, tim_back_z]) cube([tim_h - tim_hood, tim_w, tim_d]);
   color("Gold", .8) translate([tim_base_x + tim_h - tim_hood, 0, optical_z]) rotate([0, 90, 0]) cylinder(d = 50, h = tim_hood);
   color("Black") translate([tim_base_x - tim_conn_below, -18, tim_back_z - tim_conn_behind]) cube([tim_conn_below + 10, 36, tim_conn_behind + tim_conn_from_back]);
-  color("Red", .25) translate([0, 0, optical_z]) rotate([0, 90, 0]) linear_extrude(0.5) polygon([[0, 0], for (a = [-45:5:225]) fan_r * [-sin(a), cos(a)]]);   // 90° = straight down, blind sector up
+  if (fan) color("Red", .25) translate([0, 0, optical_z]) rotate([0, 90, 0]) linear_extrude(0.5) polygon([[0, 0], for (a = [-45:5:225]) fan_r * [-sin(a), cos(a)]]);   // 90° = straight down, blind sector up
 }
 // camera body + straight M12 plugs going up from its back (55 mm: connector 10.2 + plug and cable bend)
 module cam_solid(body = true, plugs = true, gap = 0.1) {
@@ -253,5 +253,59 @@ else if (part == "check_insert") intersection() { mount(); tim_insert_path(); }
 else if (part == "check_insert_cam") intersection() { cam_solid(); tim_insert_path(); }
 else if (part == "mount") mount();
 else if (part == "fit_test") fit_test();
+// how it goes together: step1..step4, then "assembled" (all with the screws and strap), arm up
+else if (part == "step1") rotate([180, 0, 0]) { flange_dummy(); color("Orange") mount(); bolts(35); dowel(-22); }
+else if (part == "step2") rotate([180, 0, 0]) { flange_dummy(); color("Orange") mount(); bolts(0); dowel(0);
+  translate([slide, 0, 75]) tim_dummy(fan = false);
+  color("Red") { arrow([tim_base_x + slide + 30, -y_in - wall - 12, tim_front_z + 70], [0, 0, -1], 60); arrow([tim_base_x + slide + 30, -y_in - wall - 12, tim_front_z + 4], [-1, 0, 0], 22); } }
+else if (part == "step3") rotate([180, 0, 0]) { flange_dummy(); color("Orange") mount(); bolts(0); dowel(0); tim_dummy(fan = false);
+  tim_screws(22); strap(); }
+else if (part == "step4") rotate([180, 0, 0]) { flange_dummy(); color("Orange") mount(); bolts(0); dowel(0); tim_dummy(fan = false); tim_screws(0); strap();
+  cam_place() translate([0, 0, 60]) cam_body_only(); cam_screws(-45); color("Red") cam_place() arrow([0, -cam_w / 2 - 14, 70], [0, 0, -1], 55); }
+else if (part == "assembled") rotate([180, 0, 0]) { flange_dummy(); color("Orange") mount(); hardware(); tim_dummy(fan = false); cam_dummy(); }
+// separate solids for a multi-part 3MF (assembly orientation)
+else if (part == "p_mount") rotate([180, 0, 0]) mount();
+else if (part == "p_flange") rotate([180, 0, 0]) flange_dummy();
+else if (part == "p_tim") rotate([180, 0, 0]) tim_solid();
+else if (part == "p_cam") rotate([180, 0, 0]) cam_place() { translate([-cam_h / 2, -cam_w / 2, 0.05]) cube([cam_h, cam_w, cam_d]); for (s = [-1, 1]) translate([33.9 - cam_h / 2, s * 11.2, -55]) cylinder(d = 15, h = 55); }
+else if (part == "p_hw") rotate([180, 0, 0]) hardware();
 // assembly view: turned so the arm is up and the belt is down
 else rotate([180, 0, 0]) { color("Orange") mount(); tim_dummy(); cam_dummy(); flange_dummy(); }
+
+// ------------------------------------------------------------------ screws, dowel, strap (for the assembly views)
+module arrow(p, d, len) {   // from p along unit vector d
+  translate(p) rotate([0, acos(d[2]), atan2(d[1], d[0])]) { cylinder(d = 3, h = len - 8); translate([0, 0, len - 8]) cylinder(d1 = 8, d2 = 0, h = 8); }
+}
+module bolts(e = 0) {       // 4 x M6 x 16 + DIN 9021 washers, pulled out by e along +Z
+  color([0.25, 0.25, 0.27]) for (a = [0, 90, 180, 270]) rotate(a) translate([fl_pcd / 2, 0, pt - cb_depth + e]) {
+    cylinder(d = 18, h = 1.6);
+    translate([0, 0, 1.6 + e / 3]) { cylinder(d = 10, h = 6); translate([0, 0, -16]) cylinder(d = 6, h = 16); }
+  }
+}
+module dowel(e = 0) { color("Silver") rotate(45) translate([fl_pcd / 2, 0, -9 + e]) cylinder(d = 6, h = 16); }
+module tim_screws(e = 0) {  // 2 x M3 x 6 into the TiM's side threads, 4 nylon-tipped set screws; pulled out by e along ±Y
+  for (s = [-1, 1]) {
+    color([0.25, 0.25, 0.27]) translate([tim_base_x + tim_hole[0], s * (y_in + wall - 3 + e), tim_back_z + tim_hole[1]]) rotate([s * -90, 0, 0]) {
+      cylinder(d = 5.5, h = 3); translate([0, 0, -6]) cylinder(d = 3, h = 6);
+    }
+    color("White") for (x = [tim_base_x + 10, tim_base_x + 40]) translate([x, s * (y_in + e), optical_z]) rotate([s * -90, 0, 0]) cylinder(d = 3, h = wall);
+  }
+}
+module strap() {            // 8 mm strap through the slot above the TiM and round its front face
+  color([0.1, 0.1, 0.1]) translate([-30, 0, 0]) {
+    translate([0, -y_in - wall - 1.5, pt + 4.5]) cube([8, 2 * (y_in + wall) + 3, 1.5]);
+    for (s = [-1, 1]) translate([0, s > 0 ? y_in + wall : -y_in - wall - 1.5, pt + 4.5]) cube([8, 1.5, tim_front_z + 1.5 - pt - 4.5]);
+    translate([0, -y_in - wall - 1.5, tim_front_z]) cube([8, 2 * (y_in + wall) + 3, 1.5]);
+  }
+}
+module cam_body_only() {
+  color("SteelBlue") translate([-cam_h / 2, -cam_w / 2, 0]) cube([cam_h, cam_w, cam_d]);
+  color("Black") for (s = [-1, 1]) translate([33.9 - cam_h / 2, s * 11.2, -55]) cylinder(d = 15, h = 55);
+  color("Black") translate([0, 0, cam_d]) cylinder(d = 20, h = 2);   // lens
+}
+module cam_screws(e = 0) {  // 2 x M4 x 8 from the top of the plate; pulled out by e along the camera's -Z
+  color([0.25, 0.25, 0.27]) cam_place() for (s = [-1, 1]) translate([12 - cam_h / 2, s * 15, -cam_under + e]) {
+    translate([0, 0, -4]) cylinder(d = 7, h = 4); cylinder(d = 4, h = 8);
+  }
+}
+module hardware() { bolts(0); dowel(0); tim_screws(0); strap(); cam_screws(0); }

@@ -85,6 +85,15 @@ If a hole is tight, change `fl_bolt`, `fl_pin` or the insert sizes. If the TiM i
 
 ## Assembly
 
+| 1. Bolt the mount to the flange | 2. TiM: up from below, then back onto the ledges |
+|---|---|
+| ![step 1](img/step1.png) | ![step 2](img/step2.png) |
+| **3. TiM screws, set screws, strap** | **4. Camera: up into its rim, M4 screws from the top** |
+| ![step 3](img/step3.png) | ![step 4](img/step4.png) |
+
+`stl/assembly_view.3mf` opens the whole assembly in a slicer as one object with five parts: the mount, the flange, the TiM, the camera, and the screws with the strap. It's for looking at only, so print `mount.stl`. Rebuild it with `analysis/make3mf.py` from the `p_*` parts of the .scad.
+
+
 1. Press the four M3 inserts into the side walls.
 2. Fit the dowel. Bolt the mount to the flange: 4 × M6 × 16 with the Ø18 washers, 3 Nm in a cross pattern. Do this first: the bolt heads are reached from below, before the sensors go in.
 3. **TiM:**
