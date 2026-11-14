@@ -475,9 +475,9 @@ body.display .dispbanner.show{display:block}
       <details class="calib"><summary>How it works</summary>
         <div class="note" style="margin-top:4px">
           On a belt, the scanner stands still and the items move under it. Here the items stand still and the arm moves the scanner over them in a straight line at the <b>belt speed</b>: the result is the same.<br>
-          The scanner is a SICK TiM 2D LiDAR (270° fan, 15 lines/s) mounted hood down, with its fan across the pass, looking down from <b>Height</b> above the belt surface. It takes <b>Scan rate</b> lines a second; each line is placed with the arm's live pose, so the lines build a 3D point cloud, coloured by height.<br>
+          The scanner is a SICK TiM 2D LiDAR (270° fan, 15 lines/s) lying on its side on the printed mount, with its fan standing across the pass and looking down from <b>Height</b> above the belt surface. It takes <b>Scan rate</b> lines a second; each line is placed with the arm's live pose, so the lines build a 3D point cloud, coloured by height.<br>
           Volume = the cross-section of each line × the distance travelled between lines, added up (the same sum a belt volume scanner does with area × belt speed). Faster passes give fewer lines; a lower <b>Resolution</b> gives more beams per line.<br>
-          The scanner and items are simulated. In the simulator, <i>scanner on the flange</i> also makes tool slot 1 the scanner's optical centre (70 mm) and the payload 0.25 kg. With the real cobot only the picture changes: set its tool and payload yourself.<br>
+          The scanner and items are simulated. In the simulator, <i>scanner on the flange</i> also makes tool slot 1 the scanner's optical centre (62.5 mm out, on the printed mount in <i>hardware/tim-sec-mount</i>) and the payload 0.5 kg (TiM, SEC110 camera and bracket). With the real cobot only the picture changes: set its tool and payload yourself.<br>
           <b>Export PLY</b> opens in CloudCompare, MeshLab or Blender; <b>CSV</b> has one row per point.</div>
       </details>
     </div>

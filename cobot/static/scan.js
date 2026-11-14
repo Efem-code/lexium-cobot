@@ -16,9 +16,16 @@ const TIM = {
   sx: 340, sy: -180, dir: 90, len: 360, height: 200, speed: 100, beltZ: 0, beltW: 400,
   show: {items: true, cloud: true, belt: true},
 };
-// the sensor body, mounted hood down (simplified, about the size of a TiM5xx/7xx: 60 × 60 × 86 mm, 0.25 kg):
-// optical centre `L` mm out from the flange
-const TIM_BODY = {w: 60, d: 60, h: 59, win: 22, L: 70, mass: 0.25, com: 35};
+// The printed mount in hardware/tim-sec-mount: the TiM lies on its side under a plate on the flange, hood axis along
+// flange X, front (90° beam) down, so its scan plane is the flange's Y-Z plane. The scan origin is L mm out from the
+// flange face. Mass = TiM 0.25 kg + SEC110 camera 0.12 kg + printed bracket and screws (about 0.13 kg).
+const TIM_BODY = {L: 62.5, mass: 0.5, com: 45};
+// shapes for the 3D view, in the flange frame (mm): centre [x, y, z] and half sizes, from tim_sec_mount.scad
+const TIM_MOUNT = [
+  {c: [9.8, 0, 5], h: [78.7, 35.4, 5], col: [232, 100, 42]},          // plate on the flange
+  {c: [-55.2, 0, 54.2], h: [12.7, 35.4, 44.2], col: [214, 92, 38]},   // cradle around the TiM's base end
+  {c: [-33.2, 0, 62.5], h: [29.2, 30, 30.5], col: [70, 74, 82]},      // TiM body
+];
 let timItems = null;
 try {
   const s = JSON.parse(localStorage.getItem("tim") || "{}");
@@ -373,6 +380,7 @@ $("sCsv").onclick = () => {
 };
 
 // ------------------------------------------------------------ 3D view
+PAINT.tim = ["#f3e08a", "#d8b62c", "#8a7212"];
 PAINT.can = ["#b6c8e6", "#6f8fc0", "#3c5a8c"];
 // under the arm: the belt strip of the pass, the items, then the point cloud
 function drawTimScene() {
@@ -434,7 +442,6 @@ function drawTimScanner() {
   if (!TIM.mounted) return;
   const f = timFlange(S); if (!f) return;
   const {fl, Rf} = f, ex = [Rf[0][0], Rf[1][0], Rf[2][0]], ey = [Rf[0][1], Rf[1][1], Rf[2][1]], ez = [Rf[0][2], Rf[1][2], Rf[2][2]];
-  const Bd = TIM_BODY, at = d => add(fl, mul(ez, d));
   const sc = timCast(fl, Rf, false);
   // fan: a few beams as faint lines, and the red laser line where it lands
   ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,60,60,.16)";
@@ -449,14 +456,15 @@ function drawTimScanner() {
   let on = false;
   for (const p of sc.hits) { const P = p && proj(p); if (!P) { on = false; continue; } on ? ctx.lineTo(P[0], P[1]) : ctx.moveTo(P[0], P[1]); on = true; }
   ctx.stroke();
-  // body (housing, then the dark window band with the optical centre in it), drawn far side first
-  const parts = [
-    {c: at(Bd.h / 2), h: [Bd.w / 2, Bd.d / 2, Bd.h / 2], col: [64, 70, 80]},
-    {c: at(Bd.h + Bd.win / 2), h: [Bd.w / 2 - 12, Bd.d / 2 - 12, Bd.win / 2], col: [24, 26, 30]},
-    {c: at(Bd.h - 9), h: [Bd.w / 2 + 1, Bd.d / 2 + 1, 4], col: [232, 100, 42], sides: true},
-  ];
-  const camOnTip = dot(sub(B.eye, at(Bd.h)), ez) > 0;
-  for (const p of camOnTip ? parts : parts.slice().reverse()) box(p.c, [ex, ey, ez], p.h, p.col, p.sides);
+  // the mount, the TiM (body + round hood on the scan plane) and the tilted camera, drawn far to near
+  const P = ([x, y, z]) => add(fl, add(mul(ex, x), add(mul(ey, y), mul(ez, z))));
+  const t = -15 * Math.PI / 180, cx = add(mul(ex, Math.cos(t)), mul(ez, -Math.sin(t))), cz = add(mul(ex, Math.sin(t)), mul(ez, Math.cos(t)));
+  const parts = TIM_MOUNT.map(m => ({c: P(m.c), draw: () => box(P(m.c), [ex, ey, ez], m.h, m.col)}));
+  parts.push({c: P([9.6, 0, 62.5]), draw: () => cyl(P([-4, 0, 62.5]), P([23.3, 0, 62.5]), 25, PAINT.tim)});
+  const camC = add(P([62, 0, 44]), mul(cz, 16.8));
+  parts.push({c: camC, draw: () => box(camC, [cx, ey, cz], [24.5, 28.75, 16.8], [70, 110, 150])});
+  parts.sort((a, b) => dot(sub(b.c, B.eye), B.f) - dot(sub(a.c, B.eye), B.f));
+  for (const p of parts) p.draw();
 }
 
 timItemsHtml(); timShow(); timRestartTimer();
