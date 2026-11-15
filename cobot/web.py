@@ -17,6 +17,12 @@ POST /api/model        {model}
 POST /api/tim/connect  {host, port, proto}   SICK TiM 2D LiDAR (proto "auto", "A" or "B")
 POST /api/tim/disconnect
 GET  /api/tim/stream   Server-Sent Events: {state, scan} for every new scan (scan = null when none came in 1 s)
+POST /api/cam/connect  {host, mode, fps, user, password, rtsp_path}   SICK SEC110 camera ("jpeg" or "rtsp")
+POST /api/cam/disconnect
+GET  /api/cam/status
+GET  /api/cam/frame    newest JPEG
+GET  /api/cam/live     the pictures as an MJPEG stream (multipart/x-mixed-replace), for an <img>
+POST /api/cam/save     {name, meta}   keep the newest picture on this PC (<settings folder>/pictures)
 """
 import hmac
 import json
@@ -28,6 +34,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import kinematics as K
 from .driver import CobotDriver, to_json
+from .sec import SecReader
+from .settings import config_dir
 from .tim import TimReader
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -66,6 +74,7 @@ class Handler(BaseHTTPRequestHandler):
 
     share = None                        # set by cli: share("status"|"on"|"off") -> dict
     tim = TimReader()                   # SICK TiM on the arm (Scan tab)
+    cam = SecReader()                   # SICK SEC110 camera on the arm (Camera view)
 
     def _local(self):
         return self.client_address[0] in ("127.0.0.1", "::1")
@@ -163,6 +172,31 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
             except OSError:
                 return
+        if self.path == "/api/cam/status":
+            return self._json(self.cam.status())
+        if self.path == "/api/cam/frame":
+            jpeg, _ = self.cam.frame(0, timeout=0)
+            return self._send(200, jpeg, "image/jpeg") if jpeg else self._json({"error": "no picture yet"}, 404)
+        if self.path == "/api/cam/live":
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            seq = 0
+            try:
+                while True:
+                    jpeg, s = self.cam.frame(seq, timeout=2.0)
+                    if not jpeg:
+                        if not self.cam.thread:
+                            return   # disconnected: end the stream (the page reconnects)
+                        continue
+                    seq = s
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
+                    self.wfile.flush()
+            except OSError:
+                return
         self._send(404, '{"error":"not found"}')
 
     def do_POST(self):
@@ -225,6 +259,14 @@ class Handler(BaseHTTPRequestHandler):
                 r = self.tim.connect(body.get("host") or "192.168.0.1", int(body.get("port") or 2111), body.get("proto") or "auto")
             elif p == "/api/tim/disconnect":
                 r = self.tim.disconnect()
+            elif p == "/api/cam/connect":
+                r = self.cam.connect(body.get("host") or "192.168.136.100", body.get("mode") or "jpeg", body.get("fps") or 5,
+                                     body.get("user") or "", body.get("password") or "", body.get("rtsp_path") or "live0",
+                                     int(body.get("rtsp_port") or 554))
+            elif p == "/api/cam/disconnect":
+                r = self.cam.disconnect()
+            elif p == "/api/cam/save":
+                r = self.cam.save(os.path.join(config_dir(), "pictures"), body.get("name") or "", body.get("meta"))
             else:
                 return self._json({"error": "not found"}, 404)
             return self._json(r)

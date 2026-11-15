@@ -2,6 +2,9 @@
 
 This is a 3D-printable mount for the LXMRL03 tool flange (JAKA Zu 3: 4 × M6 on Ø50, Ø6 pin). It carries:
 - a **SICK TiM5xx/7xx** 2D LiDAR (TiM561/571/781 all use the same housing)
+
+> **Not for the TiM240.** The TiM240 has a smaller housing: 60 × 59.5 × 75.8 mm, 150 g, two M3 threads in its **base** (44.4 mm apart, 30 mm from the back) instead of one on each side, and its scan plane 53 mm above the base. This cradle won't hold it (SICK datasheet TiM240-2050300).
+
 - a **SICK sensingCam SEC110** camera
 
 The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.scad). The printable STLs are in [stl/](stl/).

@@ -61,6 +61,21 @@ label.f{display:flex;flex-direction:column;gap:3px;color:var(--mute);font-size:1
 .jog input[type=range]{grid-column:2/5;width:100%;margin:-2px 0 6px}
 .view{grid-column:2;grid-row:2;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 30%,#26272a,#0d0e0f);min-height:0}
 canvas{display:block;width:100%;height:100%;touch-action:none}
+.vtabs{position:absolute;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:3;background:rgba(29,30,32,.9);border:1px solid var(--line);border-radius:8px;padding:2px}
+.vtabs button{padding:4px 10px;border:0;background:transparent;font-size:12px;white-space:nowrap}
+.vtabs button.sel{background:var(--accent2);color:#fff}
+body.off-scan .vtabs{display:none}
+.vpanel{position:absolute;inset:0;padding:44px 10px 10px;background:var(--bg);z-index:2;display:flex;flex-direction:column;gap:6px}
+.vpanel[hidden]{display:none}
+.vpanel canvas,.vpanel img{flex:1;min-height:0;width:100%;border-radius:6px;object-fit:contain;background:#0d0e10}
+.vinfo{font-size:12px;color:var(--mute)}.vinfo b{color:var(--text)}
+.vnote{font-size:11px;color:#6b6f76}
+.vbar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12px}
+.vbar input{padding:3px 6px}
+.vpanel.cam-sim .vreal,.vpanel.cam-real .vsim{display:none!important}
+.vdev{overflow:auto}.vdev h3{margin:6px 0;font-size:14px}.vdev .devcard{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;font-size:12.5px;line-height:1.5}
+.vdev iframe{width:100%;height:60vh;border:1px solid var(--line);border-radius:6px;background:#fff}
+body:not(.vw-3d) #hud,body:not(.vw-3d) .help,body:not(.vw-3d) #liveDrag{visibility:hidden}
 .hud{position:absolute;left:12px;top:10px;color:var(--mute);font-size:12px;pointer-events:none;line-height:1.5}
 .hud b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:500}
 .target{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:none;gap:8px;align-items:center;background:rgba(29,30,32,.96);border:1px solid var(--accent);border-radius:10px;padding:8px 10px;max-width:calc(100% - 20px);flex-wrap:wrap;justify-content:center}
@@ -159,7 +174,7 @@ body.display .dispbanner.show{display:block}
 }
 </style>
 </head>
-<body>
+<body class="vw-3d">
 <div class="app">
   <header>
     <div class="brand"><img src="guillevin-logo.png" alt="Guillevin"><span>Lexium Cobot</span></div>
@@ -175,6 +190,28 @@ body.display .dispbanner.show{display:block}
 
   <div class="view" id="view">
     <canvas id="cv"></canvas>
+    <div class="vtabs" id="vtabs"><button data-v="3d" class="sel">3D view</button><button data-v="tim">TiM scan</button><button data-v="cam">Camera</button><button data-v="dev">SICK devices</button></div>
+    <div class="vpanel" data-v="tim" hidden>
+      <canvas id="cvTim"></canvas>
+      <div class="vinfo" id="vTimInfo"></div>
+      <div class="vnote">The scanner's own view of its latest scan, as SOPAS ET shows it, in the scanner's own angles (front face down at the belt: 90° on a TiM5xx/7xx, 0° on a TiM240). Wheel = zoom, double-click = fit.</div>
+    </div>
+    <div class="vpanel" data-v="cam" hidden>
+      <div class="vbar">
+        <label><input type="radio" name="vCamSrc" value="sim"> Simulated</label>
+        <label><input type="radio" name="vCamSrc" value="real"> Real SEC110 (via this PC)</label>
+        <span class="vreal"><select id="vCamMode"><option value="jpeg">pictures (HTTP)</option><option value="rtsp">video (RTSP, needs ffmpeg)</option></select>
+        <input id="vCamHost" placeholder="camera IP" size="13"> <input id="vCamUser" placeholder="user" size="7"> <input id="vCamPass" type="password" placeholder="password" size="9">
+        <button id="vCamConn">Connect</button><button id="vCamDisc">Disconnect</button></span>
+        <label class="vsim"><input type="checkbox" id="vCamLaser" checked> show the TiM's laser line</label>
+        <button id="vCamSnap">Save picture</button>
+        <label class="vreal"><input type="checkbox" id="vCamPass"> during a pass, a picture every <input id="vCamEvery" size="3" inputmode="numeric"> mm</label>
+      </div>
+      <canvas id="cvCam" class="vsim"></canvas>
+      <img id="imgCam" class="vreal" alt="">
+      <div class="vinfo" id="vCamInfo"></div>
+    </div>
+    <div class="vpanel vdev" data-v="dev" hidden><div id="vDev"></div></div>
     <div class="hud" id="hud"></div>
     <div class="target" id="targetBar">
       <span class="mono" id="targetTxt"></span>
@@ -472,6 +509,7 @@ body.display .dispbanner.show{display:block}
       </div>
       <div class="note" id="sTimSt"></div>
       <div class="grid4 timsim">
+        <label class="f">Scanner<select id="sModel"><option value="tim5xx">TiM5xx / TiM7xx</option><option value="tim240">TiM240</option></select></label>
         <label class="f">Field of view °<input id="sFov" inputmode="decimal"></label>
         <label class="f">Resolution °<input id="sRes" inputmode="decimal"></label>
         <label class="f">Scan rate Hz<input id="sRate" inputmode="decimal"></label>
@@ -525,5 +563,6 @@ body.display .dispbanner.show{display:block}
 <script src="app.js"></script>
 <script src="draw.js"></script>
 <script src="scan.js"></script>
+<script src="views.js"></script>
 </body>
 </html>

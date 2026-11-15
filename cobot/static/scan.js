@@ -11,7 +11,7 @@
 const TIM = {
   mounted: false, free: false,
   // where the scans come from: "sim" (ray-cast here) or "real" (a TiM read by the bridge at host:port)
-  source: "sim", host: "192.168.0.1", port: 2111, flip: false, lag: 0,
+  source: "sim", host: "192.168.0.1", port: 2111, flip: false, lag: 0, model: "tim5xx",
   // scanner: a 2D LiDAR fan in the plane of the flange's Y and Z axes, looking along flange Z (down)
   fov: 270, res: 0.33, rate: 15, range: 10000, noise: 1,
   // the pass: the scanner's optical centre moves in a straight line, `height` above the belt surface (330 mm keeps
@@ -30,8 +30,19 @@ const TIM_MOUNT = [
   {c: [-42.7, 0, 55.2], h: [26.2, 36.4, 43.2], col: [214, 92, 38]},   // cradle round the TiM's body (46 mm)
   {c: [-33.2, 0, 62.5], h: [29.2, 30, 30.5], col: [70, 74, 82]},      // TiM body
   {c: [65.7, 0, 30], h: [29.8, 34.8, 18], col: [214, 92, 38]},        // camera block (same printed part)
-  {c: [63.7, 0, 62.2], h: [24.5, 28.8, 16.8], col: [60, 110, 160]},   // SEC110 camera
 ];
+// SEC110 on the mount (cam_place in tim_sec_mount.scad): back face centre at X 68, Z 46, tilted 15° so it looks back
+// towards the scan line; the lens is 33.6 mm out from the back. Field of view 82° x 52° (datasheet), 16:9 image.
+const TIM_CAM = {x: 68, z: 46, tilt: 15, lens: 33.6, hfov: 82, vfov: 52};
+// Scanner models (SICK datasheets): field, step, rate, range, and which TiM angle points out of the front face.
+// TiM5xx/7xx: 270°, 90° = front. TiM240: 240°, 1° steps, 14.5 Hz, 0° = front (-120°..+120°), one TCP connection only,
+// smaller housing (60 x 59.5 x 75.8 mm, M3 holes in the base, scan plane 53 mm above the base): the printed mount in
+// hardware/tim-sec-mount is for the TiM5xx/7xx housing.
+const TIM_MODELS = {
+  tim5xx: {name: "TiM5xx / TiM7xx", fov: 270, res: 0.33, rate: 15, range: 10000, front: 90},
+  tim240: {name: "TiM240", fov: 240, res: 1, rate: 14.5, range: 10000, front: 0},
+};
+const timFace = () => (TIM_MODELS[TIM.model] || TIM_MODELS.tim5xx).front;
 let timItems = null;
 try {
   const s = JSON.parse(localStorage.getItem("tim") || "{}");
@@ -142,7 +153,7 @@ function timRealCast(scan, fl, Rf) {
   for (let k = 0; k < scan.dist.length; k++) {
     const r = scan.dist[k];
     if (!(r > 0 && r < TIM.range)) { hits.push(null); continue; }
-    const a = (scan.start + scan.step * k) * Math.PI / 180;
+    const a = (scan.start + scan.step * k + 90 - timFace()) * Math.PI / 180;   // as a TiM5xx angle: 90° = front
     hits.push(add(o, add(mul(ey, sg * Math.cos(a) * r), mul(ez, Math.sin(a) * r))));
   }
   return {o, ex, ey, hits};
@@ -378,6 +389,13 @@ $("sTimConn").onclick = async () => {
 };
 $("sTimDisc").onclick = async () => { await api("/api/tim/disconnect", {}); TIMREAL.state = null; timShow(); };
 $("sFlip").onchange = e => { TIM.flip = e.target.checked; timSave(); };
+$("sModel").onchange = e => {
+  const m = TIM_MODELS[e.target.value]; if (!m) return;
+  Object.assign(TIM, {model: e.target.value, fov: m.fov, res: m.res, rate: m.rate, range: m.range});
+  for (const [id, k] of TIM_FIELDS) $(id).value = TIM[k];
+  timRestartTimer(); timSave(); timShow();
+  if (e.target.value === "tim240") toast("TiM240: the printed mount in hardware/tim-sec-mount is for the TiM5xx/7xx housing and won't fit it");
+};
 $("sLag").onchange = e => { TIM.lag = Math.max(0, Math.min(500, +e.target.value || 0)); timSave(); timShow(); };
 function timRealText() {
   if (DEMO) return "Real TiM: needs the app on a PC (the bridge reads the scanner), not the browser demo.";
@@ -441,7 +459,7 @@ const cm3 = v => v >= 1e6 ? `${(v / 1e6).toFixed(2)} L` : `${(v / 1000).toFixed(
 function timShow() {
   for (const [id, k] of TIM_FIELDS) if (document.activeElement !== $(id)) $(id).value = +(+TIM[k]).toFixed(2);
   $("sMount").checked = TIM.mounted; $("sFree").checked = TIM.free;
-  $("sSrc").value = TIM.source; $("sFlip").checked = TIM.flip; $("sTimSt").innerHTML = timRealText();
+  $("sSrc").value = TIM.source; $("sFlip").checked = TIM.flip; $("sModel").value = TIM.model; $("sTimSt").innerHTML = timRealText();
   if (document.activeElement !== $("sHost")) $("sHost").value = TIM.host;
   if (document.activeElement !== $("sPort")) $("sPort").value = TIM.port;
   if (document.activeElement !== $("sLag")) $("sLag").value = TIM.lag;
@@ -555,10 +573,10 @@ function drawTimScanner() {
   ctx.stroke();
   // the mount, the TiM (body + round hood on the scan plane) and the tilted camera, drawn far to near
   const P = ([x, y, z]) => add(fl, add(mul(ex, x), add(mul(ey, y), mul(ez, z))));
-  const t = -15 * Math.PI / 180, cx = add(mul(ex, Math.cos(t)), mul(ez, -Math.sin(t))), cz = add(mul(ex, Math.sin(t)), mul(ez, Math.cos(t)));
+  const t = -TIM_CAM.tilt * Math.PI / 180, cx = add(mul(ex, Math.cos(t)), mul(ez, -Math.sin(t))), cz = add(mul(ex, Math.sin(t)), mul(ez, Math.cos(t)));
   const parts = TIM_MOUNT.map(m => ({c: P(m.c), draw: () => box(P(m.c), [ex, ey, ez], m.h, m.col)}));
   parts.push({c: P([9.6, 0, 62.5]), draw: () => cyl(P([-4, 0, 62.5]), P([23.3, 0, 62.5]), 25, PAINT.tim)});
-  const camC = add(P([62, 0, 44]), mul(cz, 16.8));
+  const camC = add(P([TIM_CAM.x, 0, TIM_CAM.z]), mul(cz, 16.8));
   parts.push({c: camC, draw: () => box(camC, [cx, ey, cz], [24.5, 28.75, 16.8], [70, 110, 150])});
   parts.sort((a, b) => dot(sub(b.c, B.eye), B.f) - dot(sub(a.c, B.eye), B.f));
   for (const p of parts) p.draw();

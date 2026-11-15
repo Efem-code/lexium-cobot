@@ -824,7 +824,8 @@ function renderDisplay() {
 }
 
 // ------------------------------------------------------------ 3D view (canvas, no libraries)
-const cv = $("cv"), ctx = cv.getContext("2d");
+const cv = $("cv");
+let ctx = cv.getContext("2d");   // let: views.js draws the scene into its own canvases (simulated camera) with the same code
 const cam = {yaw: -2.2, pitch: 0.38, dist: 1750, tx: -220, ty: -60, tz: 330};
 let fittedModel = null;
 function fitCamera(reach) {
@@ -1040,6 +1041,7 @@ $("viewDrop").value = viewDrop || "";
 $("viewDrop").onchange = e => { viewDrop = Math.max(0, Math.min(2000, +e.target.value || 0)); e.target.value = viewDrop || ""; try { localStorage.setItem("viewDrop", viewDrop); } catch (_) {} };
 function draw() {
   requestAnimationFrame(draw);   // first, so one bad frame can't stop the view for good
+  if (typeof vwShown === "function" && vwShown() !== "3d") return;   // another output tab covers the 3D view (views.js)
   const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;   // hidden or collapsed: nothing to draw yet
   if (cv.width !== Math.round(rect.width * dpr) || cv.height !== Math.round(rect.height * dpr)) { cv.width = Math.round(rect.width * dpr); cv.height = Math.round(rect.height * dpr); }
