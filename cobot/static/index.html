@@ -45,6 +45,12 @@ header .brand span{padding-left:12px;border-left:2px solid #4a4c50}
 .spacer{flex:1}
 .side{overflow:auto;padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--bg);min-width:0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+/* desktop: each side column has its own tabs (phones keep the bottom tab bar) */
+.stabbar{display:none;flex-wrap:wrap;gap:3px;position:sticky;top:-12px;z-index:2;background:var(--bg);padding:2px 0 6px;margin-top:-2px}
+.stabbar button{padding:4px 9px;font-size:12px;border-radius:7px}
+.stabbar button.sel{background:var(--accent2);border-color:var(--accent);color:#fff}
+body.stabs .stabbar{display:flex}
+body.stabs .stab-off{display:none!important}
 .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 label.f{display:flex;flex-direction:column;gap:3px;color:var(--mute);font-size:11px}
@@ -65,6 +71,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none}
 .vtabs button{padding:4px 10px;border:0;background:transparent;font-size:12px;white-space:nowrap}
 .vtabs button.sel{background:var(--accent2);color:#fff}
 body.off-scan .vtabs{display:none}
+body:not(.off-scan) .hud,body:not(.off-scan) #liveDrag{top:44px}   /* below the output tabs */
 .vpanel{position:absolute;inset:0;padding:44px 10px 10px;background:var(--bg);z-index:2;display:flex;flex-direction:column;gap:6px}
 .vpanel[hidden]{display:none}
 .vpanel canvas,.vpanel img{flex:1;min-height:0;width:100%;border-radius:6px;object-fit:contain;background:#0d0e10}
@@ -231,7 +238,8 @@ body.display .dispbanner.show{display:block}
 
   <!-- LEFT -->
   <div class="side" style="grid-column:1;grid-row:2">
-    <div class="card" data-tab="setup">
+    <div class="stabbar" id="stabL"></div>
+    <div class="card" data-tab="setup" data-stab="conn" data-stab-label="Connection">
       <h2>Connection</h2>
       <div class="only-demo">
         <p style="margin:0 0 8px"><b>Demo mode</b>: the simulator is running on this device. Nothing here can move a real robot.</p>
@@ -268,6 +276,7 @@ body.display .dispbanner.show{display:block}
     <div class="card" data-tab="setup" id="cfgCard">
       <div class="row" style="justify-content:space-between"><h2>Cobot setup</h2><button id="cfgRead">Read from cobot</button></div>
       <div class="cfg">
+       <div data-stab="payload" data-stab-label="Payload">
         <div class="cfgh">Payload <span class="note" style="margin:0">(must match what's on the arm)</span></div>
         <div class="grid4">
           <label class="f">Mass kg<input id="plM" inputmode="decimal"></label>
@@ -276,7 +285,8 @@ body.display .dispbanner.show{display:block}
           <label class="f">CoM Z mm<input id="plZ" inputmode="decimal"></label>
         </div>
         <button id="plSet" class="wbtn">Apply payload</button>
-
+       </div>
+       <div data-stab="tool" data-stab-label="Tool">
         <div class="cfgh">Tool (TCP) <span class="note" style="margin:0">active: <b id="toolAct">—</b></span></div>
         <div class="row"><label class="f" style="flex:1">Slot<select id="toolSlot"></select></label></div>
         <div class="grid6" id="toolOff"></div>
@@ -286,12 +296,14 @@ body.display .dispbanner.show{display:block}
           <div class="row"><button id="tcpRec">Record pose (0)</button><button id="tcpCalc">Calculate</button><button id="tcpReset">Reset</button></div>
           <div class="note" id="tcpMsg"></div>
         </details>
-
+       </div>
+       <div data-stab="frame" data-stab-label="Frame">
         <div class="cfgh">User frame <span class="note" style="margin:0">active: <b id="userAct">—</b></span></div>
         <div class="row"><label class="f" style="flex:1">Slot<select id="userSlot"></select></label></div>
         <div class="grid6" id="userOff"></div>
         <div class="row"><button id="userSet" class="wbtn">Save slot</button><button id="userUse" class="wbtn">Use this frame</button></div>
-
+       </div>
+       <div data-stab="limits" data-stab-label="Limits">
         <div class="cfgh">Bridge limits <span class="note" style="margin:0">(checked by this app before every move)</span></div>
         <div class="grid4" style="grid-template-columns:repeat(3,minmax(0,1fr))">
           <label class="f">Floor Z mm<input id="limZ" inputmode="decimal"></label>
@@ -300,7 +312,10 @@ body.display .dispbanner.show{display:block}
         </div>
         <div class="note" style="margin:0">Moves whose tool tip would pass below the floor are refused; a jog heading down stops there. Speeds are capped before the speed slider applies.</div>
         <button id="limSet">Save limits</button>
-
+        <div class="cfgh">Safety <span class="note" style="margin:0">(view only; change in Cobot Expert)</span></div>
+        <div class="light">Collision sensitivity: <b id="clsn" style="color:var(--text)">—</b></div>
+       </div>
+       <div data-stab="app" data-stab-label="App">
         <div class="no-demo">
           <div class="cfgh">Phones, tablets &amp; TVs</div>
           <div class="row"><button id="shareBtn">Share with phones &amp; TVs</button><span id="shareState" class="note" style="margin:0"></span></div>
@@ -323,14 +338,12 @@ body.display .dispbanner.show{display:block}
           <label class="row"><input type="checkbox" id="ftProg"> Programs on the cobot</label>
         </div>
         <div class="note" style="margin:0">Only one thing moves the arm at a time: while a drawing, a scan pass, waypoint play, a script or live drag runs, the others, jog and the Go buttons wait. <b>STOP</b> (or Esc) ends whichever is running.</div>
-
-        <div class="cfgh">Safety <span class="note" style="margin:0">(view only; change in Cobot Expert)</span></div>
-        <div class="light">Collision sensitivity: <b id="clsn" style="color:var(--text)">—</b></div>
+       </div>
       </div>
       <div class="note" id="cfgMsg">Changes need <b>Arm motion</b> ticked. Each change is read back from the cobot to confirm it took.</div>
     </div>
 
-    <div class="card" data-tab="robot">
+    <div class="card" data-tab="robot" data-stab="robot" data-stab-label="Robot">
       <h2>Robot</h2>
       <div class="lights" id="lights"></div>
       <div class="grid2" style="margin-top:10px">
@@ -347,7 +360,7 @@ body.display .dispbanner.show{display:block}
       </div>
     </div>
 
-    <div class="card" data-tab="data">
+    <div class="card" data-tab="data" data-stab="live" data-stab-label="Live data">
       <div class="row" style="justify-content:space-between"><h2>Live data</h2>
         <div class="row"><button id="recBtn">● Record</button><button id="recSave" disabled>Save CSV</button></div></div>
       <div class="note" id="recMsg" style="margin:0 0 6px">Records joints, TCP, speeds and I/O at the live update rate.</div>
@@ -358,12 +371,13 @@ body.display .dispbanner.show{display:block}
 
   <!-- RIGHT -->
   <div class="side" style="grid-column:3;grid-row:2">
-    <div class="card show" data-tab="jog">
+    <div class="stabbar" id="stabR"></div>
+    <div class="card show" data-tab="jog" data-stab="jog" data-stab-label="Jog">
       <div class="row" style="justify-content:space-between"><h2>Joint jog (hold)</h2><span style="color:var(--mute)">deg/s <input id="jspd" value="20" inputmode="numeric" style="width:52px"></span></div>
       <div id="joints"></div>
       <div class="row"><button id="bSliders">Move to sliders</button><button id="bSync">Reset sliders</button></div>
     </div>
-    <div class="card show" data-tab="jog">
+    <div class="card show" data-tab="jog" data-stab="jog">
       <div class="row" style="justify-content:space-between">
         <h2>Cartesian jog (hold)</h2>
         <div class="seg"><button id="fBase" class="sel">Base</button><button id="fTool">Tool</button></div>
@@ -371,7 +385,7 @@ body.display .dispbanner.show{display:block}
       <div class="row" style="color:var(--mute);margin-bottom:6px">mm/s <input id="cspd" value="50" inputmode="numeric" style="width:56px"> deg/s <input id="rspd" value="15" inputmode="numeric" style="width:52px"></div>
       <div id="cart"></div>
     </div>
-    <div class="card" data-tab="points">
+    <div class="card" data-tab="points" data-stab="points" data-stab-label="Points">
       <div class="row" style="justify-content:space-between"><h2>Waypoints</h2><div class="row"><button id="bTeach">+ Teach</button><button id="bPlay" class="primary">Play</button></div></div>
       <div class="row" style="color:var(--mute);margin-bottom:6px">
         <label class="row"><input type="checkbox" id="loop"> Loop continuously</label>
@@ -404,7 +418,7 @@ body.display .dispbanner.show{display:block}
       </div>
       <div class="note">J = joint move (curved path), L = straight line. Tap to switch.</div>
     </div>
-    <div class="card" data-tab="script" id="scriptCard">
+    <div class="card" data-tab="script" id="scriptCard" data-stab="script" data-stab-label="Script" data-stab-feat="script">
       <div class="row" style="justify-content:space-between">
         <h2>Script</h2>
         <div class="row"><select id="scExample"><option value="">Examples…</option></select>
@@ -416,7 +430,7 @@ body.display .dispbanner.show{display:block}
       <div class="log mono" id="scOut"></div>
       <div class="note" id="scDoc" style="display:none;white-space:pre-wrap"></div>
     </div>
-    <div class="card" data-tab="points" id="progCard">
+    <div class="card" data-tab="points" id="progCard" data-stab="points">
       <h2>Programs on the cobot</h2>
       <div class="row"><input id="progName" list="progNames" placeholder="Program name (as saved in Cobot Expert)" style="flex:1" autocomplete="off"><datalist id="progNames"></datalist><button id="progLoad" class="wbtn">Load</button></div>
       <div class="grid4" style="margin-top:6px">
@@ -426,7 +440,7 @@ body.display .dispbanner.show{display:block}
       <div class="light" style="margin-top:8px">Loaded: <b id="progLoaded" style="color:var(--text)">—</b> · <b id="progState" style="color:var(--text)">—</b> · line <b id="progLine" style="color:var(--text)">—</b></div>
       <div class="note">Programs run at the speeds saved in them: this page's speed limit doesn't apply. Keep the pendant E-stop in reach. The cobot can't list its programs, so type the name; names you load are remembered here.</div>
     </div>
-    <div class="card" data-tab="draw" id="drawCard">
+    <div class="card" data-tab="draw" id="drawCard" data-stab="draw" data-stab-label="Draw" data-stab-feat="draw">
       <div class="row" style="justify-content:space-between"><h2>Draw (G-code)</h2>
         <div class="row"><button id="dRun" class="primary">Draw</button><button id="dPause">Pause</button><button id="dStop" class="danger">Stop</button></div></div>
       <div class="row"><button id="dOpen">Open G-code</button><button id="dSample">Sample</button>
@@ -472,7 +486,7 @@ body.display .dispbanner.show{display:block}
           <b>Export for TM262</b> saves the same path as Structured Text for Machine Expert (a point list the PLC runs with MoveL).</div>
       </details>
     </div>
-    <div class="card" data-tab="scan" id="scanCard">
+    <div class="card" data-tab="scan" id="scanCard" data-stab="scan" data-stab-label="Scan" data-stab-feat="scan">
       <div class="row" style="justify-content:space-between"><h2>Scan (SICK TiM, simulated)</h2>
         <div class="row"><button id="sRun" class="primary">Scan</button><button id="sStop" class="danger">Stop</button></div></div>
       <div class="row" style="color:var(--mute)"><label class="row"><input type="checkbox" id="sMount"> scanner on the flange</label>
@@ -527,22 +541,22 @@ body.display .dispbanner.show{display:block}
           On a belt, the scanner stands still and the items move under it. Here the items stand still and the arm moves the scanner over them in a straight line at the <b>belt speed</b>: the result is the same.<br>
           The scanner is a SICK TiM 2D LiDAR (270° fan, 15 lines/s) lying on its side on the printed mount, with its fan standing across the pass and looking down from <b>Height</b> above the belt surface. It takes <b>Scan rate</b> lines a second; each line is placed with the arm's live pose, so the lines build a 3D point cloud, coloured by height.<br>
           Volume = the cross-section of each line × the distance travelled between lines, added up (the same sum a belt volume scanner does with area × belt speed). Faster passes give fewer lines; a lower <b>Resolution</b> gives more beams per line.<br>
-          The scanner and items are simulated. In the simulator, <i>scanner on the flange</i> also makes tool slot 1 the scanner's optical centre (62.5 mm out, on the printed mount in <i>hardware/tim-sec-mount</i>) and the payload 0.68 kg (TiM, SEC110 camera and the one-piece mount). With the real cobot only the picture changes: set its tool and payload yourself.<br>
+          The scanner and items are simulated. In the simulator, <i>scanner on the flange</i> also makes tool slot 1 the scanner's optical centre (64.75 mm out, on the printed TiM240 mount in <i>hardware/tim-sec-mount</i>) and the payload 0.55 kg at X 13, Z 44 (TiM240, SEC110 camera and the one-piece mount). With the real cobot only the picture changes: set its tool and payload yourself.<br>
           <b>Export PLY</b> opens in CloudCompare, MeshLab or Blender; <b>CSV</b> has one row per point.</div>
       </details>
     </div>
-    <div class="card" data-tab="data">
+    <div class="card" data-tab="data" data-stab="io" data-stab-label="I/O">
       <h2>Digital I/O</h2>
       <div style="color:var(--mute);font-size:11px;margin-bottom:4px">DO 0–15 (tap to toggle)</div>
       <div class="io" id="dout"></div>
       <div style="color:var(--mute);font-size:11px;margin:8px 0 4px">DI 0–15</div>
       <div class="io" id="din"></div>
     </div>
-    <div class="card" data-tab="data">
+    <div class="card" data-tab="data" data-stab="logs" data-stab-label="Logs">
       <h2>Controller log</h2>
       <div class="log mono" id="log"></div>
     </div>
-    <div class="card" data-tab="data">
+    <div class="card" data-tab="data" data-stab="logs">
       <div class="row" style="justify-content:space-between"><h2>Bridge log</h2><button id="blogSave">Save</button></div>
       <div class="note" style="margin:0 0 4px">What this app sent, how long the cobot took to answer, and every stop the app made itself. Newest first.</div>
       <div class="log mono" id="blog" style="max-height:220px"></div>

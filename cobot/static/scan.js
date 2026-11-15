@@ -11,24 +11,24 @@
 const TIM = {
   mounted: false, free: false,
   // where the scans come from: "sim" (ray-cast here) or "real" (a TiM read by the bridge at host:port)
-  source: "sim", host: "192.168.0.1", port: 2111, flip: false, lag: 0, model: "tim5xx",
+  source: "sim", host: "192.168.0.1", port: 2111, flip: false, lag: 0, model: "tim240",
   // scanner: a 2D LiDAR fan in the plane of the flange's Y and Z axes, looking along flange Z (down)
-  fov: 270, res: 0.33, rate: 15, range: 10000, noise: 1,
+  fov: 240, res: 1, rate: 14.5, range: 10000, noise: 1,
   // the pass: the scanner's optical centre moves in a straight line, `height` above the belt surface (330 mm keeps
   // the belt at least 0.3 m from the SEC110's lens: its shortest working distance)
   sx: 340, sy: -180, dir: 90, len: 360, height: 330, speed: 100, beltZ: 0, beltW: 400,
   show: {items: true, cloud: true, belt: true},
 };
-// The printed mount in hardware/tim-sec-mount: the TiM lies on its side under a plate on the flange, hood axis along
-// flange X, front (90° beam) down, so its scan plane is the flange's Y-Z plane. The scan origin is L mm out from the
-// flange face. Mass = TiM 0.25 kg + SEC110 camera 0.12 kg + the one-piece printed mount (about 0.28 kg) + screws;
-// centre of mass in the flange frame (mm), from hardware/tim-sec-mount/analysis.
-const TIM_BODY = {L: 62.5, mass: 0.68, com: [7, 0, 44]};
+// The printed mount in hardware/tim-sec-mount (for a TiM240): the TiM lies on its side under a plate on the flange,
+// base towards -X and hood towards +X, front (its 0° beam) down, so its scan plane is the flange's Y-Z plane. The scan
+// origin is L mm out from the flange face. Mass = TiM240 0.15 kg + SEC110 0.12 kg + the printed mount (about 0.25 kg)
+// + screws; centre of mass in the flange frame (mm), from the mount's geometry.
+const TIM_BODY = {L: 64.75, mass: 0.55, com: [13, 0, 44]};
 // shapes for the 3D view, in the flange frame (mm): centre [x, y, z] and half sizes, from tim_sec_mount.scad
 const TIM_MOUNT = [
-  {c: [13.3, 0, 6], h: [82.2, 36.4, 6], col: [232, 100, 42]},         // plate on the flange
-  {c: [-42.7, 0, 55.2], h: [26.2, 36.4, 43.2], col: [214, 92, 38]},   // cradle round the TiM's body (46 mm)
-  {c: [-33.2, 0, 62.5], h: [29.2, 30, 30.5], col: [70, 74, 82]},      // TiM body
+  {c: [18.05, 0, 6], h: [77.45, 36.4, 6], col: [232, 100, 42]},      // plate on the flange
+  {c: [-39.2, 0, 55.95], h: [20.2, 36.4, 43.95], col: [214, 92, 38]}, // cradle round the TiM240's body (34 mm)
+  {c: [-35, 0, 64.75], h: [18, 30, 29.75], col: [70, 74, 82]},        // TiM240 body (the box part, 36 mm)
   {c: [65.7, 0, 30], h: [29.8, 34.8, 18], col: [214, 92, 38]},        // camera block (same printed part)
 ];
 // SEC110 on the mount (cam_place in tim_sec_mount.scad): back face centre at X 68, Z 46, tilted 15° so it looks back
@@ -575,7 +575,7 @@ function drawTimScanner() {
   const P = ([x, y, z]) => add(fl, add(mul(ex, x), add(mul(ey, y), mul(ez, z))));
   const t = -TIM_CAM.tilt * Math.PI / 180, cx = add(mul(ex, Math.cos(t)), mul(ez, -Math.sin(t))), cz = add(mul(ex, Math.sin(t)), mul(ez, Math.cos(t)));
   const parts = TIM_MOUNT.map(m => ({c: P(m.c), draw: () => box(P(m.c), [ex, ey, ez], m.h, m.col)}));
-  parts.push({c: P([9.6, 0, 62.5]), draw: () => cyl(P([-4, 0, 62.5]), P([23.3, 0, 62.5]), 25, PAINT.tim)});
+  parts.push({c: P([3, 0, TIM_BODY.L]), draw: () => cyl(P([-17, 0, TIM_BODY.L]), P([22.8, 0, TIM_BODY.L]), 24, PAINT.tim)});   // TiM240 hood
   const camC = add(P([TIM_CAM.x, 0, TIM_CAM.z]), mul(cz, 16.8));
   parts.push({c: camC, draw: () => box(camC, [cx, ey, cz], [24.5, 28.75, 16.8], [70, 110, 150])});
   parts.sort((a, b) => dot(sub(b.c, B.eye), B.f) - dot(sub(a.c, B.eye), B.f));

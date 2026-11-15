@@ -1,7 +1,7 @@
 import sys, zipfile, numpy as np, trimesh
 D = sys.argv[1]; out = sys.argv[2]
 parts = [("Mount (print this)", "p_mount", "#F59B1E"), ("Flange (arm, reference)", "p_flange", "#B4B4B4"),
-         ("SICK TiM", "p_tim", "#505050"), ("SICK SEC110", "p_cam", "#3C78B4"), ("Screws, dowel, strap", "p_hw", "#202020")]
+         ("SICK TiM240", "p_tim", "#505050"), ("SICK SEC110", "p_cam", "#3C78B4"), ("Screws, dowel, strap", "p_hw", "#202020")]
 meshes = [trimesh.load(f"{D}/{f}.stl", force="mesh") for _, f, _ in parts]
 zmin = min(m.bounds[0][2] for m in meshes)
 res = ['<?xml version="1.0" encoding="UTF-8"?>',

@@ -86,7 +86,51 @@ $("tabs").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("sel", x === b));
   document.querySelectorAll(".card[data-tab]").forEach(c => c.classList.toggle("show", c.dataset.tab === b.dataset.tab));
+  // the same choice made in code (e.g. "send to Script") also picks the desktop side tab
+  const m = {setup: ["conn"], robot: ["robot"], data: ["live", "io"], jog: ["jog"], points: ["points"], draw: ["draw"], scan: ["scan"], script: ["script"]}[b.dataset.tab];
+  if (m && typeof stabPick === "function") m.forEach(stabPick);
 });
+
+// ------------------------------------------------------------ side tabs (desktop)
+// Each side column gets its own row of tabs built from its [data-stab] cards and sections, so the long columns show
+// one thing at a time. Phones keep the bottom tab bar instead (body.stabs is only set when that bar is hidden).
+const STAB = {sel: {}};
+try { STAB.sel = JSON.parse(localStorage.getItem("stab") || "{}"); } catch (_) {}
+function stabOn(bar) {
+  const side = bar.parentElement, names = [];
+  for (const el of side.querySelectorAll("[data-stab-label]")) {
+    const f = el.dataset.stabFeat;
+    if (f && typeof FEAT !== "undefined" && FEAT[f] === false) continue;
+    if (el.closest(".no-demo") && document.body.classList.contains("demo")) continue;
+    names.push([el.dataset.stab, el.dataset.stabLabel]);
+  }
+  return names;
+}
+function stabRefresh() {
+  document.body.classList.toggle("stabs", getComputedStyle($("tabs")).display === "none");
+  for (const bar of document.querySelectorAll(".stabbar")) {
+    const names = stabOn(bar);
+    let cur = STAB.sel[bar.id];
+    if (!names.some(([n]) => n === cur)) cur = names.length ? names[0][0] : null;
+    const html = names.map(([n, l]) => `<button data-s="${n}"${n === cur ? ' class="sel"' : ""}>${l}</button>`).join("");
+    if (bar.innerHTML !== html) bar.innerHTML = html;
+    for (const el of bar.parentElement.querySelectorAll("[data-stab]")) {
+      const match = el.dataset.stab === cur || !!el.querySelector(`[data-stab="${cur}"]`);
+      el.classList.toggle("stab-off", !match);
+    }
+    // a card that only holds sections (Cobot setup) shows when one of them is picked
+    for (const card of bar.parentElement.querySelectorAll(".card:not([data-stab])"))
+      if (card.querySelector("[data-stab]")) card.classList.toggle("stab-off", !card.querySelector(`[data-stab="${cur}"]`));
+  }
+}
+function stabPick(name) {
+  for (const bar of document.querySelectorAll(".stabbar"))
+    if (bar.parentElement.querySelector(`[data-stab="${name}"]`)) { STAB.sel[bar.id] = name; }
+  try { localStorage.setItem("stab", JSON.stringify(STAB.sel)); } catch (_) {}
+  stabRefresh();
+}
+document.addEventListener("click", e => { const b = e.target.closest(".stabbar button[data-s]"); if (b) stabPick(b.dataset.s); });
+window.addEventListener("resize", stabRefresh);
 
 // ------------------------------------------------------------ build UI
 const JN = ["J1", "J2", "J3", "J4", "J5", "J6"], CN = ["X", "Y", "Z", "RX", "RY", "RZ"];
@@ -1239,6 +1283,7 @@ function applyFeatures() {
   // phones: if the open tab was just hidden, go back to Jog
   const sel = document.querySelector("#tabs button.sel");
   if (sel && getComputedStyle(sel).display === "none") document.querySelector('#tabs button[data-tab="jog"]').click();
+  stabRefresh();   // desktop side tabs: a feature switched off loses its tab
 }
 for (const [k, id] of Object.entries(FEAT_IDS)) $(id).onchange = e => {
   FEAT[k] = e.target.checked;

@@ -7,7 +7,6 @@ import json
 import math
 import sys
 
-import gmsh
 import numpy as np
 import pyamg
 from skfem import Basis, ElementTetP2, ElementVector, LinearForm, MeshTet, asm, condense
@@ -17,7 +16,7 @@ TOL = 0.15
 G = 9.81                      # N per kg per g
 E, NU = 1800.0, 0.38          # printed PETG
 RHO = 1.27e-6 * 0.8           # kg/mm^3, perimeters + infill
-M_TIM, M_CAM = 0.25 + 0.10, 0.12 + 0.08   # sensor + an allowance for the cable that hangs off it
+M_TIM, M_CAM = 0.25 + 0.10, 0.12 + 0.08   # TiM5xx/7xx (the old design) / SEC110, + an allowance for the hanging cable
 I_TIM = M_TIM / 12 * np.array([61**2 + 60**2, 86**2 + 61**2, 86**2 + 60**2])   # kg mm^2, box approximation
 I_CAM = M_CAM / 12 * np.array([57.5**2 + 33.6**2, 49**2 + 33.6**2, 49**2 + 57.5**2])
 
@@ -32,20 +31,25 @@ def design(name):
     if name == "old":
         pt, gap, wall, clr, clen = 10, 22, 5, 0.4, 36
         cam_T, cam_tilt = np.array([62, 0, pt + 34]), 15
+        tim = dict(d=61, scan=62.46, axis=30.5, mass=M_TIM, I=I_TIM, com_x=-25)
     elif name.startswith("new"):
         P = json.load(open("params.json"))
         pt, gap, wall, clr, clen = P["pt"], P["gap"], P["wall"], P["clr"], P["cradle_len"]
         cam_T, cam_tilt = np.array([P["cam_x"], 0, pt + P["cam_drop"]]), P["cam_tilt"]
+        m = P.get("tim_mass", 0.25) + 0.10
+        tim = dict(d=P.get("tim_d", 61), scan=P.get("tim_scan", 62.46), axis=P.get("tim_axis", 30.5), mass=m,
+                   I=m / 12 * np.array([P.get("tim_d", 61)**2 + 60**2, 76**2 + P.get("tim_d", 61)**2, 76**2 + 60**2]),
+                   com_x=-P.get("tim_scan", 62.46) + 30)
     else:
         raise SystemExit("design?")
-    back = pt + gap; front = back + 61; yin = 30 + clr; base = -62.46
+    back = pt + gap; front = back + tim["d"]; yin = 30 + clr; base = -tim["scan"]
     R = rot_y(-cam_tilt)
 
     def fixed(c, n):          # flange contact annulus (spigot Ø63 to recess Ø31.5), clamped by 4 x M6 preload
         r = np.hypot(c[0], c[1])
         return (np.abs(c[2]) < TOL) & (r > 15.75) & (r < 31.5)
 
-    def tim(c, n):            # faces that touch the TiM: side walls, base wall / posts, lip / ledges, back pads, screw holes
+    def tim_faces(c, n):      # faces that touch the TiM: side walls, base wall / posts, lip / ledges, back pads, screw holes
         x, y, z = c
         inbox = (x > base - clr - TOL) & (x < base + clen + TOL) & (z > back - clr - TOL) & (z < front + clr + TOL)
         side = (np.abs(np.abs(y) - yin) < TOL) & inbox
@@ -59,10 +63,10 @@ def design(name):
         nl = R.T @ n
         return (np.abs(l[2]) < TOL) & (np.abs(l[0]) < 24.6) & (np.abs(l[1]) < 28.9) & (nl[2] > 0.9)
 
-    tim_com = np.array([-25.0, 0, back + 30.5])
+    tim_com = np.array([tim["com_x"], 0, back + tim["axis"]])
     cam_com = cam_T + R @ np.array([0, 0, 16.8])
-    optical = np.array([0, 0, back + 30.5])
-    return dict(fixed=fixed, loads=[("TiM", tim, M_TIM, I_TIM, tim_com), ("SEC110", cam, M_CAM, I_CAM, cam_com)],
+    optical = np.array([0, 0, back + tim["axis"]])
+    return dict(fixed=fixed, loads=[("TiM", tim_faces, tim["mass"], tim["I"], tim_com), ("SEC110", cam, M_CAM, I_CAM, cam_com)],
                 optical=optical, cam_T=cam_T, R=R)
 
 
@@ -290,8 +294,8 @@ def run(name, stl, h=2.5):
         defl[k] = {s: float(np.linalg.norm(v["u_mm"])) for s, v in mot.items()}
     out["defl_1g_mm"] = defl
     for k in ("1g X", "1g Y", "1g Z"):
-        num = sum(mm * defl[k][s] for s, mm in (("TiM", M_TIM), ("SEC110", M_CAM)))
-        den = sum(mm * defl[k][s]**2 for s, mm in (("TiM", M_TIM), ("SEC110", M_CAM)))
+        num = sum(g[4] * defl[k][g[0]] for g in groups)
+        den = sum(g[4] * defl[k][g[0]]**2 for g in groups)
         freq[k] = float(math.sqrt(9810 * num / den) / (2 * math.pi)) if den > 0 else None
     out["f_est_hz"] = freq
     print("  worst per g:", best)
