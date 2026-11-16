@@ -36,6 +36,37 @@ All of them start the simulator and open the controller page at http://127.0.0.1
 
 Settings (bridge limits, iPad PIN) are saved per user in `%APPDATA%\LexiumCobot\settings.json` (Windows) or `~/.lexium-cobot/settings.json`.
 
+## Run it on an always-on server (no PC needed)
+
+The app can run headless as a service on a Linux machine that stays on. Here that is the demo room's **ubuntuserver**. Phones, tablets, TVs and PCs then open its page in a browser, with no laptop involved.
+
+```bash
+deploy/ubuntuserver/deploy.sh temp@ubuntuserver 8765
+```
+
+- **What it does:**
+  - copies the committed version of this checkout to `~/lexium-cobot` on the server, asking for the password once
+  - installs it as a systemd user service, `lexium-cobot`, that starts at boot and restarts if it stops
+  - prints the page's addresses and its PIN
+- **Updating:** run the same command again after pulling or committing changes.
+- **Where it is now:** port 8765 on ubuntuserver, at `http://192.168.10.210:8765` on the demo room network and `http://100.78.59.66:8765` over Tailscale. The PIN is in `~/.lexium-cobot/settings.json` on the server.
+- **What the server needs to reach:**
+  - the cobot: its own Wi-Fi is 10.5.5.100, so cable the cobot into the demo room network or put the server's spare Wi-Fi adapter on the cobot's Wi-Fi
+  - the TiM240 and the SEC110: on the same network, for example through a small switch at the arm
+- **On the server:**
+
+  ```bash
+  systemctl --user status lexium-cobot
+  ```
+
+  ```bash
+  journalctl --user -u lexium-cobot -f
+  ```
+
+  ```bash
+  systemctl --user restart lexium-cobot
+  ```
+
 ## Connect to the real cobot
 
 1. Join the cobot's Wi-Fi (SSID = controller serial, password on the label in the cabinet door). The controller is `10.5.5.100`.
