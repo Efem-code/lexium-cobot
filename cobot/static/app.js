@@ -51,10 +51,10 @@ const cmd = (name, extra = {}) => api("/api/cmd", Object.assign({cmdName: name},
 // ------------------------------------------------------------ features + one mover at a time
 // Features can be switched off in Setup (hidden, and they can't move the arm). Drawing, waypoint play, a script
 // and live drag each own the arm while they run: jog, Go buttons and the other features wait until it ends.
-const FEAT = {draw: true, live: true, gripper: true, script: true, programs: true};
+const FEAT = {draw: true, scan: true, live: true, gripper: true, script: true, programs: true};
 try { Object.assign(FEAT, JSON.parse(localStorage.getItem("features") || "{}")); } catch (_) {}
 const RUN = {owner: null};
-const OWNER = {draw: "A drawing", play: "Waypoint play", script: "A script", live: "Live drag"};
+const OWNER = {draw: "A drawing", scan: "A scan pass", play: "Waypoint play", script: "A script", live: "Live drag"};
 function busy(name) {
   if (RUN.owner && RUN.owner !== name) { toast(`${OWNER[RUN.owner]} is running: stop it first${RUN.owner === "live" ? " (Live drag button)" : " (STOP)"}`); return true; }
   if (typeof P !== "undefined" && P.state === "running") { toast("A program is running on the cobot: stop it first"); return true; }
@@ -86,7 +86,51 @@ $("tabs").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("sel", x === b));
   document.querySelectorAll(".card[data-tab]").forEach(c => c.classList.toggle("show", c.dataset.tab === b.dataset.tab));
+  // the same choice made in code (e.g. "send to Script") also picks the desktop side tab
+  const m = {setup: ["conn"], robot: ["robot"], data: ["live", "io"], jog: ["jog"], points: ["points"], draw: ["draw"], scan: ["scan"], script: ["script"]}[b.dataset.tab];
+  if (m && typeof stabPick === "function") m.forEach(stabPick);
 });
+
+// ------------------------------------------------------------ side tabs (desktop)
+// Each side column gets its own row of tabs built from its [data-stab] cards and sections, so the long columns show
+// one thing at a time. Phones keep the bottom tab bar instead (body.stabs is only set when that bar is hidden).
+const STAB = {sel: {}};
+try { STAB.sel = JSON.parse(localStorage.getItem("stab") || "{}"); } catch (_) {}
+function stabOn(bar) {
+  const side = bar.parentElement, names = [];
+  for (const el of side.querySelectorAll("[data-stab-label]")) {
+    const f = el.dataset.stabFeat;
+    if (f && typeof FEAT !== "undefined" && FEAT[f] === false) continue;
+    if (el.closest(".no-demo") && document.body.classList.contains("demo")) continue;
+    names.push([el.dataset.stab, el.dataset.stabLabel]);
+  }
+  return names;
+}
+function stabRefresh() {
+  document.body.classList.toggle("stabs", getComputedStyle($("tabs")).display === "none");
+  for (const bar of document.querySelectorAll(".stabbar")) {
+    const names = stabOn(bar);
+    let cur = STAB.sel[bar.id];
+    if (!names.some(([n]) => n === cur)) cur = names.length ? names[0][0] : null;
+    const html = names.map(([n, l]) => `<button data-s="${n}"${n === cur ? ' class="sel"' : ""}>${l}</button>`).join("");
+    if (bar.innerHTML !== html) bar.innerHTML = html;
+    for (const el of bar.parentElement.querySelectorAll("[data-stab]")) {
+      const match = el.dataset.stab === cur || !!el.querySelector(`[data-stab="${cur}"]`);
+      el.classList.toggle("stab-off", !match);
+    }
+    // a card that only holds sections (Cobot setup) shows when one of them is picked
+    for (const card of bar.parentElement.querySelectorAll(".card:not([data-stab])"))
+      if (card.querySelector("[data-stab]")) card.classList.toggle("stab-off", !card.querySelector(`[data-stab="${cur}"]`));
+  }
+}
+function stabPick(name) {
+  for (const bar of document.querySelectorAll(".stabbar"))
+    if (bar.parentElement.querySelector(`[data-stab="${name}"]`)) { STAB.sel[bar.id] = name; }
+  try { localStorage.setItem("stab", JSON.stringify(STAB.sel)); } catch (_) {}
+  stabRefresh();
+}
+document.addEventListener("click", e => { const b = e.target.closest(".stabbar button[data-s]"); if (b) stabPick(b.dataset.s); });
+window.addEventListener("resize", stabRefresh);
 
 // ------------------------------------------------------------ build UI
 const JN = ["J1", "J2", "J3", "J4", "J5", "J6"], CN = ["X", "Y", "Z", "RX", "RY", "RZ"];
@@ -179,6 +223,7 @@ function stopAll() {
   api("/api/stop", {});
   playing = false; if (scRun) scRun.aborted = true; setLive(false);
   if (typeof JOB !== "undefined" && JOB.active) JOB.active = false;
+  if (typeof TIMJOB !== "undefined" && TIMJOB.active) TIMJOB.active = false;
 }
 $("btnStop").onclick = stopAll;
 $("bPower").onclick = () => cmd("power_on");
@@ -823,7 +868,8 @@ function renderDisplay() {
 }
 
 // ------------------------------------------------------------ 3D view (canvas, no libraries)
-const cv = $("cv"), ctx = cv.getContext("2d");
+const cv = $("cv");
+let ctx = cv.getContext("2d");   // let: views.js draws the scene into its own canvases (simulated camera) with the same code
 const cam = {yaw: -2.2, pitch: 0.38, dist: 1750, tx: -220, ty: -60, tz: 330};
 let fittedModel = null;
 function fitCamera(reach) {
@@ -1039,6 +1085,7 @@ $("viewDrop").value = viewDrop || "";
 $("viewDrop").onchange = e => { viewDrop = Math.max(0, Math.min(2000, +e.target.value || 0)); e.target.value = viewDrop || ""; try { localStorage.setItem("viewDrop", viewDrop); } catch (_) {} };
 function draw() {
   requestAnimationFrame(draw);   // first, so one bad frame can't stop the view for good
+  if (typeof vwShown === "function" && vwShown() !== "3d") return;   // another output tab covers the 3D view (views.js)
   const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;   // hidden or collapsed: nothing to draw yet
   if (cv.width !== Math.round(rect.width * dpr) || cv.height !== Math.round(rect.height * dpr)) { cv.width = Math.round(rect.width * dpr); cv.height = Math.round(rect.height * dpr); }
@@ -1068,11 +1115,13 @@ function draw() {
   } else { ctx.fillStyle = "#2e3034"; poly(ring(95, 0, 32)); ctx.fill(); }
   drawFrame([0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 200, .9);
   if (typeof drawPaper === "function" && FEAT.draw) drawPaper();   // Draw tab: paper, drawing and ink (draw.js)
+  if (typeof drawTimScene === "function" && FEAT.scan) drawTimScene();   // Scan tab: items and point cloud (scan.js)
   if (ghost) drawArm(ghost.points, .35, true);
   // no live data (cobot unreachable, bridge down): keep the last known pose, faded, instead of an empty scene
   if (S.points) lastPts = S.points;
   else if (!lastPts && !lastPtsAsked) { lastPtsAsked = true; api("/api/fk", {joints: [0, 90, -90, 90, 90, 0]}).then(r => { if (r.points && !lastPts) lastPts = r.points; }).catch(() => { lastPtsAsked = false; }); }
   drawArm(S.points || lastPts, S.points ? 1 : .3, false, !!S.points);
+  if (typeof drawTimScanner === "function" && FEAT.scan && S.points) drawTimScanner();   // scanner body + laser fan
   const feedLost = S.mode === "real" && S.connected && !S.stream_ok && !S.modbus_ok;
   // powered off / disabled: every move is refused, so say so where people are looking
   const notReady = S.points && S.connected && !S.estop && (S.powered === false || S.enabled === false);
@@ -1223,16 +1272,18 @@ async function follow() {
 }
 
 // ------------------------------------------------------------ feature switches (Setup)
-const FEAT_IDS = {draw: "ftDraw", live: "ftLive", gripper: "ftGrip", script: "ftScript", programs: "ftProg"};
+const FEAT_IDS = {draw: "ftDraw", scan: "ftScan", live: "ftLive", gripper: "ftGrip", script: "ftScript", programs: "ftProg"};
 function applyFeatures() {
   for (const [k, id] of Object.entries(FEAT_IDS)) { $(id).checked = FEAT[k]; document.body.classList.toggle("off-" + k, !FEAT[k]); }
   // a feature switched off while it runs is stopped
   if (!FEAT.live && live) setLive(false);
   if (!FEAT.draw && typeof JOB !== "undefined" && JOB.active) { JOB.active = false; api("/api/stop", {}); }
+  if (!FEAT.scan && typeof TIMJOB !== "undefined" && TIMJOB.active) { TIMJOB.active = false; api("/api/stop", {}); }
   if (!FEAT.script && scRun) { scRun.aborted = true; api("/api/stop", {}); }
   // phones: if the open tab was just hidden, go back to Jog
   const sel = document.querySelector("#tabs button.sel");
   if (sel && getComputedStyle(sel).display === "none") document.querySelector('#tabs button[data-tab="jog"]').click();
+  stabRefresh();   // desktop side tabs: a feature switched off loses its tab
 }
 for (const [k, id] of Object.entries(FEAT_IDS)) $(id).onchange = e => {
   FEAT[k] = e.target.checked;
@@ -1256,6 +1307,7 @@ for (const [k, id] of Object.entries(FEAT_IDS)) $(id).onchange = e => {
   let renderQueued = false;
   T.subscribe(s => {
     S = s; recSample();
+    if (typeof timFeed === "function") timFeed(s);
     if (!renderQueued) { renderQueued = true; requestAnimationFrame(() => { renderQueued = false; render(); }); }
   });
   setTimeout(syncSliders, 600);

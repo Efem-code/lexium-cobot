@@ -36,6 +36,37 @@ All of them start the simulator and open the controller page at http://127.0.0.1
 
 Settings (bridge limits, iPad PIN) are saved per user in `%APPDATA%\LexiumCobot\settings.json` (Windows) or `~/.lexium-cobot/settings.json`.
 
+## Run it on an always-on server (no PC needed)
+
+The app can run headless as a service on a Linux machine that stays on. Here that is the demo room's **ubuntuserver**. Phones, tablets, TVs and PCs then open its page in a browser, with no laptop involved.
+
+```bash
+deploy/ubuntuserver/deploy.sh temp@ubuntuserver 8765
+```
+
+- **What it does:**
+  - copies the committed version of this checkout to `~/lexium-cobot` on the server, asking for the password once
+  - installs it as a systemd user service, `lexium-cobot`, that starts at boot and restarts if it stops
+  - prints the page's addresses and its PIN
+- **Updating:** run the same command again after pulling or committing changes.
+- **Where it is now:** port 8765 on ubuntuserver, at `http://192.168.10.210:8765` on the demo room network and `http://100.78.59.66:8765` over Tailscale. The PIN is in `~/.lexium-cobot/settings.json` on the server.
+- **What the server needs to reach:**
+  - the cobot: its own Wi-Fi is 10.5.5.100, so cable the cobot into the demo room network or put the server's spare Wi-Fi adapter on the cobot's Wi-Fi
+  - the TiM240 and the SEC110: on the same network, for example through a small switch at the arm
+- **On the server:**
+
+  ```bash
+  systemctl --user status lexium-cobot
+  ```
+
+  ```bash
+  journalctl --user -u lexium-cobot -f
+  ```
+
+  ```bash
+  systemctl --user restart lexium-cobot
+  ```
+
 ## Connect to the real cobot
 
 1. Join the cobot's Wi-Fi (SSID = controller serial, password on the label in the cabinet door). The controller is `10.5.5.100`.
@@ -53,11 +84,14 @@ Details and everything verified on the real controller: [docs/REAL_HARDWARE.md](
 | **Robot** | power on/off, enable/disable, clear error, go home (asks first on the real cobot), status lights. |
 | **Points** | teach waypoints (J = joint move, L = straight line per point), add **gripper open/close steps** (one digital output, or two for a double-acting valve, with a wait time; the simulator draws a SCHUNK Co-act EGP-C 40 whose jaws follow those outputs), reorder steps, play once or **loop continuously** with a pause, export/import as files, turn them into a script. **Programs on the cobot**: load a program saved on the controller by name, run / pause / resume / stop, with live state and line. |
 | **Draw** | import a **G-code drawing** (Inkscape, svg2gcode and other pen-plotter exports: Z moves, M3/M5 or G0/G1; arcs supported), place it on a sheet of paper (corner taught with the pen tip, rotate, scale, *Fit to paper*), see the paper, the drawing and the ink in the 3D view, then **Draw**: joint move to Start, straight-line strokes with the pen lifted between them, joint move to Finish. Pause lifts the pen. **Export for TM262** saves the same path as Structured Text for Machine Expert. The simulator has a pen holder (Points → Gripper outputs). |
+| **Scan** | a simulated **SICK TiM** 2D LiDAR on the flange, scanning virtual items (boxes, cylinders, balls) on the table. The arm carries the scanner in a straight line at the **belt speed**, the same as items riding a belt under a fixed scanner. Lines come at the scanner's own rate (15 Hz, like a TiM) and are placed with the arm's live pose, building a **3D point cloud** coloured by height. Only points between the **belt edges** count. The **volume** is each line's cross-section (heights averaged in 5 mm bins across the belt, shadows behind items taken as vertical edges) × the distance travelled, shown next to the true volume. Export as **PLY** (CloudCompare, MeshLab, Blender) or CSV. *Record while jogging* scans as you jog by hand. **Real TiM:** pick *Real TiM (via this PC)*, enter its address (default 192.168.0.1:2111) and Connect; the bridge reads it (CoLa A or B, auto-detected) and the page places each real scan line with the arm's pose. Try it without hardware: `python -m tests.fake_tim`. The printable one-piece mount for a SICK TiM240 and a SICK SEC110 camera, with its stress analysis and a sliced Bambu A1 mini project, is in [hardware/tim-sec-mount](hardware/tim-sec-mount/). |
+| **Output tabs** (over the 3D view, with the Scan feature on) | **TiM scan**: the scanner's own view of its latest scan, as SOPAS ET's monitor shows it (simulated or real; TiM5xx/7xx or **TiM240** angles). **Camera**: a **simulated SEC110** picture rendered from the camera's place on the mount (items, belt, the TiM's laser line; warns when the lens is closer than its 0.3 m working distance), or the **real SEC110** through the bridge: live pictures over HTTP (`/authenticationFree/liveJpegImage`) or RTSP video through ffmpeg, *Save picture*, and a picture every N mm during a pass, kept on this PC with the arm's pose (`<settings folder>/pictures`). **SICK devices**: status, and the SEC110's own web page (link or framed). The TiM has no web page: SOPAS ET (Windows) configures it. Try it without a camera: `python -m tests.fake_sec --port 8090`, then connect to `127.0.0.1:8090`. |
+| **Side tabs** (desktop) | each side column has its own row of tabs, so it shows one thing at a time. Left: **Connection**, **Payload** (the tool's weight and centre of mass), **Tool** (TCP slots and calibration), **Frame**, **Limits** (plus the safety readout), **App** (sharing, 3D view, features), **Robot**, **Live data**. Right: **Jog**, **Points**, **Script**, **Draw**, **Scan**, **I/O**, **Logs**. Tabs for switched-off features disappear. Phones keep the bottom tab bar. |
 | **Script** | write and run JavaScript with the same commands as the Python SDK; examples, save/open files, live log, Stop. |
 | **Data** | joint speeds/currents/temperatures, digital I/O (tap a DO to switch it), controller log, **record to CSV**. |
 | **Setup** | connect (simulator or real cobot); **payload**; **tool (TCP) slots**, active tool and **4-point tool calibration**; **user frames**; **bridge limits** (floor height, max joint and linear speed); collision sensitivity (view only). Every setting change is read back from the cobot to confirm it took. |
 
-**STOP** (header) or **Esc** stops all motion and whatever is running (drawing, waypoint play, script, live drag). Only one of those moves the arm at a time: while one runs, the others, jog and the Go buttons are refused with a message. **Setup → Features** switches Draw, Live drag, gripper steps, Script and cobot Programs on or off (remembered per device).
+**STOP** (header) or **Esc** stops all motion and whatever is running (drawing, scan pass, waypoint play, script, live drag). Only one of those moves the arm at a time: while one runs, the others, jog and the Go buttons are refused with a message. **Setup → Features** switches Draw, Scan, Live drag, gripper steps, Script and cobot Programs on or off (remembered per device).
 
 **TVs and shared screens:** open `http://<PC address>:8765/display` (the addresses and PIN are listed under **Setup → Phones, tablets & TVs** once sharing is on). It shows the arm full screen with status and a large E-stop / fault banner, and sends no commands: touching it can only rotate and zoom the view.
 
@@ -107,6 +141,8 @@ Safety configuration, creating/editing programs stored on the controller, user a
 ```bash
 python -m tests.test_e2e     # driver + simulator over real sockets
 python -m tests.test_sdk     # the Python SDK, scripted like a user would
+python -m tests.test_tim     # SICK TiM reader (CoLa A and B) against a fake TiM
+python -m tests.test_sec     # SICK SEC110 camera reader and /api/cam against a fake camera
 ```
 
 Releases: `git tag v1.0.1 && git push origin v1.0.1` builds `LexiumCobot.exe` and publishes it (`.github/workflows/release.yml`). Every push to `main` redeploys the demo.

@@ -1,7 +1,7 @@
 // Service worker: keeps the app shell available offline (demo works with no
 // internet, e.g. while the iPad is on the cobot's Wi-Fi). /api is never cached.
-const CACHE = "cobot-v19";
-const SHELL = ["./", "index.html", "app.js", "draw.js", "sim.js", "manifest.webmanifest",
+const CACHE = "cobot-v23";
+const SHELL = ["./", "index.html", "app.js", "draw.js", "scan.js", "views.js", "sim.js", "manifest.webmanifest",
                "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "guillevin-logo.png"];
 
 self.addEventListener("install", e => {

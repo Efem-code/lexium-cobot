@@ -1,0 +1,1 @@
+{"plates": [{"plate_name": "Fit test + mount", "need_arrange": true, "objects": [{"path": "stl/mount.stl", "count": 1, "filaments": [1], "assemble_index": [0]}, {"path": "stl/fit_test.stl", "count": 1, "filaments": [1], "assemble_index": [1]}]}]}
