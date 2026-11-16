@@ -60,6 +60,14 @@ The design is one parametric OpenSCAD file, [tim_sec_mount.scad](tim_sec_mount.s
 
 Those are the only two printed parts. Everything else is bought hardware: see [Hardware](#hardware).
 
+**Qidi X-Max 3, Bambu Lab PLA, both parts on one plate:** [print/tim_sec_mount_QidiXMax3_PLA.3mf](print/tim_sec_mount_QidiXMax3_PLA.3mf), 10 h 1 min, 328 g.
+- **Settings:** 0.20 mm layers, 6 walls, 5 top layers, 40 % gyroid infill, no supports, 220 °C, bed 60 °C, normal PLA cooling.
+- **Solid plate:** 60 bottom layers, so the first 12 mm (the plate under the flange bolts) is solid. PLA slowly gives way under steady bolt pressure, and a solid plate keeps that pressure down.
+- **Bolts in PLA:** tighten the M6 screws to **2 Nm, not 3**, and check them again after a day and after a week.
+- **Heat:** keep the mount away from heat (above about 45 °C). On the X-Max 3, leave the chamber heater off and the lid or door open for PLA.
+
+The profiles are `print/*QidiXMax3*.json` and `print/assemble_one_plate.json`.
+
 **Settings:**
 - Bambu Lab A1 mini, 0.4 mm nozzle, textured PEI plate.
 - Bambu PETG Basic at 245 °C, bed at 70 °C.
