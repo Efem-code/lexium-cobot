@@ -56,6 +56,7 @@ def _ensure_local_sim(host, modbus_port, cmd_port, status_port, model):
 class Handler(BaseHTTPRequestHandler):
     driver: CobotDriver = None
     pin: str = ""                       # empty = no PIN (localhost-only use)
+    require_pin: bool = False           # True: even localhost must present the PIN (reverse proxy / Tailscale Funnel)
     token: str = secrets.token_hex(16)  # session cookie value, new every run
     failures = {}                       # ip -> (count, last_time) for login throttling
     protocol_version = "HTTP/1.1"
@@ -66,8 +67,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.client_address[0] in ("127.0.0.1", "::1")
 
     def _authed(self):
-        if not self.pin or self._local():
-            return True  # the PC itself never needs the PIN
+        if not self.pin:
+            return True
+        if self._local() and not self.require_pin:
+            return True  # the PC itself; skipped when behind a proxy/funnel (--require-pin)
         for part in (self.headers.get("Cookie") or "").split(";"):
             k, _, v = part.strip().partition("=")
             if k == "cobot_token" and hmac.compare_digest(v, self.token):
@@ -226,9 +229,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": False, "error": "Wrong PIN"}, 403)
 
 
-def serve(host="127.0.0.1", port=8765, driver=None, pin=""):
+def serve(host="127.0.0.1", port=8765, driver=None, pin="", require_pin=False):
     Handler.driver = driver or CobotDriver()
     Handler.pin = pin
+    Handler.require_pin = require_pin
     httpd = ThreadingHTTPServer((host, port), Handler)
     httpd.daemon_threads = True
     return httpd
