@@ -150,6 +150,7 @@ def main(argv=None):
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--lan", action="store_true", help="serve the UI to phones/tablets on the network (PIN required)")
     ap.add_argument("--pin", help="PIN for --lan (default: random, saved in the settings file)")
+    ap.add_argument("--require-pin", action="store_true", help="require the PIN even for localhost (use behind a reverse proxy / Tailscale Funnel, where all traffic appears local)")
     ap.add_argument("--version", action="version", version=f"lexium-cobot {__version__}")
     a = ap.parse_args(argv)
 
@@ -180,7 +181,7 @@ def main(argv=None):
             cfg = bridge_settings(a.pin)
             pin, Handler.token = cfg["pin"], cfg["token"]
         try:
-            httpd = serve("0.0.0.0" if a.lan else "127.0.0.1", a.ui_port, drv, pin)
+            httpd = serve("0.0.0.0" if a.lan else "127.0.0.1", a.ui_port, drv, pin, require_pin=a.require_pin)
         except OSError as e:
             raise SystemExit(f"[ui] port {a.ui_port} is busy ({e}). Is the app already open? "
                              f"Use the open window, or start with --ui-port 8766")
